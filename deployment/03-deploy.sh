@@ -7,10 +7,10 @@
 set -e
 
 # Konfigurace - UPRAV PODLE SVÉHO PROSTŘEDÍ
-LXC_IP="192.168.1.XXX"  # IP adresa LXC kontejneru (zjistíš z 01-create-lxc.sh)
+LXC_IP="10.140.0.184"  # IP adresa LXC kontejneru (zjistíš z 01-create-lxc.sh)
 LXC_USER="root"
 LXC_PASSWORD="tacek123"  # Heslo z 01-create-lxc.sh
-PROXMOX_IP="192.168.1.XXX"  # IP Proxmoxu
+PROXMOX_IP="10.140.0.XXX"  # IP Proxmoxu - UPRAV!
 LXC_ID="110"  # ID kontejneru
 
 echo "🍺 Tácek Deployment Script"
