@@ -20,13 +20,13 @@ export default function Dashboard() {
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-          <Link to="/event/new" className="btn btn-primary text-center py-5 text-lg hover:scale-105 transform transition-transform">
+          <Link to="/event/new" className="btn btn-primary text-center py-5 text-lg">
             ➕ {TEXTS.buttons.createEvent}
           </Link>
-          <Link to="/members" className="btn btn-secondary text-center py-5 text-lg hover:scale-105 transform transition-transform">
+          <Link to="/members" className="btn btn-secondary text-center py-5 text-lg">
             👥 {TEXTS.labels.members}
           </Link>
-          <Link to="/menu" className="btn btn-secondary text-center py-5 text-lg hover:scale-105 transform transition-transform">
+          <Link to="/menu" className="btn btn-secondary text-center py-5 text-lg">
             📋 {TEXTS.labels.menuItems}
           </Link>
         </div>
@@ -103,7 +103,7 @@ export default function Dashboard() {
                 <Link
                   key={event.id}
                   to={`/event/${event.id}`}
-                  className="card hover:shadow-xl hover:scale-[1.02] transition-all block group"
+                  className="card hover:shadow-xl transition-shadow block group"
                 >
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex-1">

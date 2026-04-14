@@ -617,9 +617,9 @@ export default function EventDetail() {
                       {!isSelfPaid && (
                         <button
                           onClick={() => handleToggleMemberExpansion(balance.memberId)}
-                          className="btn btn-secondary w-full mt-3 text-sm"
+                          className={`btn w-full mt-3 text-sm ${isExpanded ? 'btn-secondary' : 'btn-primary'}`}
                         >
-                          {isExpanded ? 'Skrýt ▲' : 'Přidat položky ▼'}
+                          {isExpanded ? '✓ Hotovo' : hasItems ? '✏️ Upravit konzumaci' : '➕ Přidat konzumaci'}
                         </button>
                       )}
                     </>
@@ -629,7 +629,9 @@ export default function EventDetail() {
                 {/* Expanded consumption form */}
                 {isExpanded && !isSelfPaid && (
                   <div className="border-t border-gray-300 bg-white p-4">
-                    <h4 className="font-medium text-gray-700 mb-3">Přidat konzumaci:</h4>
+                    <h4 className="font-medium text-gray-700 mb-3">
+                      {hasItems ? '✏️ Upravit konzumaci' : '➕ Přidat konzumaci'}
+                    </h4>
                     
                     {/* Regular Items */}
                     <div className="mb-4">
