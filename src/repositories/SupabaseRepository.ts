@@ -1,6 +1,23 @@
 import { supabase } from '../lib/supabase';
 import { IDataRepository } from './IDataRepository';
-import { Member, MenuItem, Event, EventItem, MemberConsumption } from '../types/models';
+import { Member, MenuItem, Event, MemberConsumption } from '../types/models';
+import { Database } from '../types/database';
+
+type EventRow = Database['public']['Tables']['events']['Row'];
+type EventMemberRow = Database['public']['Tables']['event_members']['Row'];
+type EventPresetItemRow = Database['public']['Tables']['event_preset_items']['Row'];
+type ConsumptionItemRow = Database['public']['Tables']['consumption_items']['Row'];
+type ConsumptionSharedItemRow = Database['public']['Tables']['consumption_shared_items']['Row'];
+
+type ConsumptionRowWithRelations = Database['public']['Tables']['member_consumptions']['Row'] & {
+  consumption_items: ConsumptionItemRow[] | null;
+  consumption_shared_items: ConsumptionSharedItemRow[] | null;
+};
+
+interface EventRowWithRelations extends EventRow {
+  event_members: EventMemberRow[] | null;
+  event_preset_items: EventPresetItemRow[] | null;
+}
 
 /**
  * Optimized Supabase Repository with nested queries to eliminate N+1 problem
@@ -11,6 +28,26 @@ import { Member, MenuItem, Event, EventItem, MemberConsumption } from '../types/
  * - getEventConsumptions(): 10+ queries → 1 query
  */
 export class SupabaseRepository implements IDataRepository {
+
+  private mapRowToEvent(row: EventRowWithRelations): Event {
+    return {
+      id: row.id,
+      date: new Date(row.date),
+      name: row.name ?? undefined,
+      payerId: row.payer_id,
+      totalAmount: row.total_amount,
+      tip: row.tip,
+      presentMemberIds: row.event_members?.map((em) => em.member_id) || [],
+      selfPaidMemberIds: row.event_members?.filter((em) => em.paid_self).map((em) => em.member_id) || [],
+      presetItems: row.event_preset_items && row.event_preset_items.length > 0
+        ? row.event_preset_items.map((pi) => ({
+            menuItemId: pi.menu_item_id,
+            quantity: pi.quantity
+          }))
+        : undefined,
+      status: row.status as Event['status']
+    };
+  }
   
   // ===== MEMBERS =====
   
@@ -26,8 +63,8 @@ export class SupabaseRepository implements IDataRepository {
       id: row.id,
       name: row.name,
       isCore: row.is_core,
-      revolutUsername: row.revolut_username,
-      bankAccount: row.bank_account
+      revolutUsername: row.revolut_username ?? undefined,
+      bankAccount: row.bank_account ?? undefined
     }));
   }
   
@@ -81,8 +118,8 @@ export class SupabaseRepository implements IDataRepository {
     return data.map(row => ({
       id: row.id,
       name: row.name,
-      price: parseFloat(row.price),
-      category: row.category,
+      price: row.price,
+      category: row.category as MenuItem['category'],
       isShared: row.is_shared,
       isFavorite: row.is_favorite
     }));
@@ -152,23 +189,7 @@ export class SupabaseRepository implements IDataRepository {
     
     if (error) throw error;
     
-    return eventsData.map(row => ({
-      id: row.id,
-      date: new Date(row.date),
-      name: row.name,
-      payerId: row.payer_id,
-      totalAmount: parseFloat(row.total_amount),
-      tip: parseFloat(row.tip),
-      presentMemberIds: row.event_members?.map((em: any) => em.member_id) || [],
-      selfPaidMemberIds: row.event_members?.filter((em: any) => em.paid_self).map((em: any) => em.member_id) || [],
-      presetItems: row.event_preset_items && row.event_preset_items.length > 0
-        ? row.event_preset_items.map((pi: any) => ({
-            menuItemId: pi.menu_item_id,
-            quantity: pi.quantity
-          }))
-        : undefined,
-      status: row.status
-    }));
+    return eventsData.map(row => this.mapRowToEvent(row));
   }
   
   /**
@@ -198,23 +219,7 @@ export class SupabaseRepository implements IDataRepository {
       throw error;
     }
     
-    return {
-      id: row.id,
-      date: new Date(row.date),
-      name: row.name,
-      payerId: row.payer_id,
-      totalAmount: parseFloat(row.total_amount),
-      tip: parseFloat(row.tip),
-      presentMemberIds: row.event_members?.map((em: any) => em.member_id) || [],
-      selfPaidMemberIds: row.event_members?.filter((em: any) => em.paid_self).map((em: any) => em.member_id) || [],
-      presetItems: row.event_preset_items && row.event_preset_items.length > 0
-        ? row.event_preset_items.map((pi: any) => ({
-            menuItemId: pi.menu_item_id,
-            quantity: pi.quantity
-          }))
-        : undefined,
-      status: row.status
-    };
+    return this.mapRowToEvent(row);
   }
   
   async createEvent(event: Event): Promise<void> {
@@ -353,17 +358,17 @@ export class SupabaseRepository implements IDataRepository {
     
     if (error) throw error;
     
-    return (consumptionsData || []).map(row => ({
+    return ((consumptionsData || []) as ConsumptionRowWithRelations[]).map(row => ({
       eventId: row.event_id,
       memberId: row.member_id,
-      items: row.consumption_items?.map((item: any) => ({
+      items: row.consumption_items?.map((item: ConsumptionItemRow) => ({
         menuItemId: item.menu_item_id,
         quantity: item.quantity
       })) || [],
-      sharedItemIds: row.consumption_shared_items?.map((s: any) => s.menu_item_id) || [],
+      sharedItemIds: row.consumption_shared_items?.map((s: ConsumptionSharedItemRow) => s.menu_item_id) || [],
       paidEntryFeeForIds: [], // Not implemented in schema yet
       hasPaid: row.has_paid,
-      totalAmount: parseFloat(row.total_amount)
+      totalAmount: row.total_amount
     }));
   }
   
@@ -461,8 +466,8 @@ export class SupabaseRepository implements IDataRepository {
     // Delete related data in parallel (they don't depend on each other)
     await Promise.all([
       supabase.from('consumption_shared_items').delete().neq('consumption_id', '00000000-0000-0000-0000-000000000000'),
-      supabase.from('consumption_items').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
-      supabase.from('event_preset_items').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+      supabase.from('consumption_items').delete().neq('consumption_id', '00000000-0000-0000-0000-000000000000'),
+      supabase.from('event_preset_items').delete().neq('event_id', '00000000-0000-0000-0000-000000000000'),
       supabase.from('event_members').delete().neq('event_id', '00000000-0000-0000-0000-000000000000')
     ]);
     

@@ -2,9 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { v4 as uuidv4 } from 'uuid';
-import { Event, EventItem } from '../types/models';
+import { toast } from 'sonner';
+import { format } from 'date-fns';
+import { Event } from '../types/models';
 import { useEventDraft } from '../hooks/useEventDraft';
+import { useEventForm } from '../hooks/useEventForm';
+import { MemberSelector } from '../components/event-form/MemberSelector';
+import { PayerSection } from '../components/event-form/PayerSection';
+import { PresetItemsEditor } from '../components/event-form/PresetItemsEditor';
 import { TEXTS } from '../constants/texts';
+
+const getLastSunday = (): Date => {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
+  const daysToSubtract = dayOfWeek === 0 ? 7 : dayOfWeek;
+  const lastSunday = new Date(today);
+  lastSunday.setDate(today.getDate() - daysToSubtract);
+  return lastSunday;
+};
+
+const generateEventName = (date: Date): string => {
+  return `Cloud kvíz ${format(date, 'dd.MM.yyyy')}`;
+};
 
 export default function CreateEvent() {
   const { members, menuItems, repository, refreshEvents } = useApp();
@@ -12,26 +31,25 @@ export default function CreateEvent() {
   const { draft, saveDraft, clearDraft, hasDraft } = useEventDraft();
 
   const coreMembers = members.filter(m => m.isCore);
-  
-  const [eventData, setEventData] = useState({
-    date: new Date().toISOString().split('T')[0],
-    name: '',
-    payerId: '',
-    totalAmount: '',
-    tip: '',
+  const initialDate = getLastSunday();
+
+  const form = useEventForm({
+    initialSelectedMemberIds: coreMembers.map(m => m.id),
+    initialSelfPaidMemberIds: [],
+    initialHasReceipt: false,
+    initialPresetItems: [],
+    initialEventData: {
+      date: initialDate.toISOString().split('T')[0],
+      name: generateEventName(initialDate),
+      payerId: '',
+      totalAmount: '',
+      tip: '',
+    },
+    menuItems,
   });
 
-  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>(
-    coreMembers.map(m => m.id)
-  );
-
-  const [selfPaidMemberIds, setSelfPaidMemberIds] = useState<string[]>([]);
-
-  const [hasReceipt, setHasReceipt] = useState(false);
-  const [presetItems, setPresetItems] = useState<EventItem[]>([]);
   const [showDraftDialog, setShowDraftDialog] = useState(false);
 
-  // Check for draft on mount
   useEffect(() => {
     if (hasDraft() && draft) {
       setShowDraftDialog(true);
@@ -40,43 +58,42 @@ export default function CreateEvent() {
 
   // Auto-save draft when form changes
   useEffect(() => {
-    // Don't save if form is empty or just initialized
-    if (!eventData.date && !eventData.name && !eventData.payerId) {
+    if (!form.eventData.date && !form.eventData.name && !form.eventData.payerId) {
       return;
     }
 
     const timer = setTimeout(() => {
       saveDraft({
-        date: eventData.date,
-        name: eventData.name,
-        payerId: eventData.payerId,
-        totalAmount: eventData.totalAmount,
-        tip: eventData.tip,
-        selectedMemberIds,
-        selfPaidMemberIds,
-        hasReceipt,
-        presetItems,
+        date: form.eventData.date,
+        name: form.eventData.name,
+        payerId: form.eventData.payerId,
+        totalAmount: form.eventData.totalAmount,
+        tip: form.eventData.tip,
+        selectedMemberIds: form.selectedMemberIds,
+        selfPaidMemberIds: form.selfPaidMemberIds,
+        hasReceipt: form.hasReceipt,
+        presetItems: form.presetItems,
         savedAt: new Date(),
       });
-    }, 1000); // Auto-save after 1 second of inactivity
+    }, 1000);
 
     return () => clearTimeout(timer);
-  }, [eventData, selectedMemberIds, selfPaidMemberIds, hasReceipt, presetItems]);
+  }, [form.eventData, form.selectedMemberIds, form.selfPaidMemberIds, form.hasReceipt, form.presetItems]);
 
   const loadDraft = () => {
     if (!draft) return;
-    
-    setEventData({
+
+    form.setEventData({
       date: draft.date,
       name: draft.name,
       payerId: draft.payerId,
       totalAmount: draft.totalAmount,
       tip: draft.tip,
     });
-    setSelectedMemberIds(draft.selectedMemberIds);
-    setSelfPaidMemberIds(draft.selfPaidMemberIds || []);
-    setHasReceipt(draft.hasReceipt);
-    setPresetItems(draft.presetItems);
+    form.setSelectedMemberIds(draft.selectedMemberIds);
+    form.setSelfPaidMemberIds(draft.selfPaidMemberIds || []);
+    form.setHasReceipt(draft.hasReceipt);
+    form.setPresetItems(draft.presetItems);
     setShowDraftDialog(false);
   };
 
@@ -85,89 +102,43 @@ export default function CreateEvent() {
     setShowDraftDialog(false);
   };
 
-  const handleMemberToggle = (memberId: string) => {
-    setSelectedMemberIds(prev =>
-      prev.includes(memberId)
-        ? prev.filter(id => id !== memberId)
-        : [...prev, memberId]
-    );
-    
-    // If member is deselected, remove from self-paid as well
-    if (selectedMemberIds.includes(memberId)) {
-      setSelfPaidMemberIds(prev => prev.filter(id => id !== memberId));
-    }
-  };
-
-  const handleSelfPaidToggle = (memberId: string) => {
-    setSelfPaidMemberIds(prev =>
-      prev.includes(memberId)
-        ? prev.filter(id => id !== memberId)
-        : [...prev, memberId]
-    );
-  };
-
-  const handleAddPresetItem = () => {
-    if (menuItems.length === 0) return;
-    setPresetItems([
-      ...presetItems,
-      { menuItemId: menuItems[0].id, quantity: 1 },
-    ]);
-  };
-
-  const handleUpdatePresetItem = (index: number, field: 'menuItemId' | 'quantity', value: string | number) => {
-    const updated = [...presetItems];
-    if (field === 'menuItemId') {
-      updated[index].menuItemId = value as string;
-    } else {
-      updated[index].quantity = parseInt(value as string) || 0;
-    }
-    setPresetItems(updated);
-  };
-
-  const handleRemovePresetItem = (index: number) => {
-    setPresetItems(presetItems.filter((_, i) => i !== index));
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (selectedMemberIds.length === 0) {
-      alert(TEXTS.errors.noMembers);
+
+    if (form.selectedMemberIds.length === 0) {
+      toast.error(TEXTS.errors.noMembers);
       return;
     }
 
-    if (!eventData.payerId) {
-      alert(TEXTS.errors.noPayer);
+    if (!form.eventData.payerId) {
+      toast.error(TEXTS.errors.noPayer);
       return;
     }
 
     const event: Event = {
       id: uuidv4(),
-      date: new Date(eventData.date),
-      name: eventData.name.trim() || undefined,
-      payerId: eventData.payerId,
-      totalAmount: parseFloat(eventData.totalAmount) || 0,
-      tip: parseFloat(eventData.tip) || 0,
-      presentMemberIds: selectedMemberIds,
-      selfPaidMemberIds: selfPaidMemberIds.length > 0 ? selfPaidMemberIds : undefined,
-      presetItems: hasReceipt && presetItems.length > 0 ? presetItems : undefined,
+      date: new Date(form.eventData.date),
+      name: form.eventData.name.trim() || undefined,
+      payerId: form.eventData.payerId,
+      totalAmount: parseFloat(form.eventData.totalAmount) || 0,
+      tip: parseFloat(form.eventData.tip) || 0,
+      presentMemberIds: form.selectedMemberIds,
+      selfPaidMemberIds: form.selfPaidMemberIds.length > 0 ? form.selfPaidMemberIds : undefined,
+      presetItems: form.hasReceipt && form.presetItems.length > 0 ? form.presetItems : undefined,
       status: 'open',
     };
 
-    await repository.createEvent(event);
-    await refreshEvents();
-    
-    // Clear draft after successful creation
-    clearDraft();
-    
-    // Navigate to event detail
-    navigate(`/event/${event.id}`);
+    try {
+      await repository.createEvent(event);
+      await refreshEvents();
+      clearDraft();
+      navigate(`/event/${event.id}`);
+      toast.success('Událost vytvořena');
+    } catch (error) {
+      console.error('Failed to create event:', error);
+      toast.error('Nepodařilo se vytvořit událost');
+    }
   };
-
-  const presetItemsTotal = presetItems.reduce((total, item) => {
-    const menuItem = menuItems.find(mi => mi.id === item.menuItemId);
-    return total + (menuItem ? menuItem.price * item.quantity : 0);
-  }, 0);
 
   return (
     <div className="max-w-2xl mx-auto p-4 pb-20">
@@ -234,258 +205,61 @@ export default function CreateEvent() {
             <label className="label">Datum</label>
             <input
               type="date"
-              value={eventData.date}
-              onChange={(e) => setEventData({ ...eventData, date: e.target.value })}
+              value={form.eventData.date}
+              onChange={(e) => {
+                const newDate = new Date(e.target.value);
+                form.setEventData({
+                  ...form.eventData,
+                  date: e.target.value,
+                  name: generateEventName(newDate)
+                });
+              }}
               className="input"
               required
             />
           </div>
 
           <div className="mb-4">
-            <label className="label">Název (volitelné)</label>
+            <label className="label">Název</label>
             <input
               type="text"
-              value={eventData.name}
-              onChange={(e) => setEventData({ ...eventData, name: e.target.value })}
+              value={form.eventData.name}
+              onChange={(e) => form.setEventData({ ...form.eventData, name: e.target.value })}
               className="input"
-              placeholder="např. Pub kvíz v Pivovarské"
+              placeholder="např. Cloud kvíz 14.04.2026"
             />
           </div>
         </div>
 
-        {/* Members Selection */}
-        <div className="card mb-4">
-          <h2 className="text-lg font-semibold mb-4">Přítomní členové</h2>
-          
-          {members.length === 0 ? (
-            <p className="text-gray-500">
-              Zatím nemáte žádné členy. <Link to="/members" className="text-primary-600 underline">Přidejte členy</Link>
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {members.map(member => {
-                const isSelected = selectedMemberIds.includes(member.id);
-                const isSelfPaid = selfPaidMemberIds.includes(member.id);
-                
-                return (
-                  <div
-                    key={member.id}
-                    className={`p-3 rounded-lg border-2 transition-colors ${
-                      isSelected
-                        ? isSelfPaid
-                          ? 'bg-gray-50 border-gray-300'
-                          : 'bg-primary-50 border-primary-300'
-                        : 'bg-gray-50 border-transparent'
-                    }`}
-                  >
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => handleMemberToggle(member.id)}
-                        className="w-5 h-5 text-primary-600 rounded focus:ring-primary-500"
-                      />
-                      <span className={`font-medium ${isSelfPaid ? 'text-gray-600' : 'text-gray-900'}`}>
-                        {isSelfPaid && '💰 '}
-                        {member.isCore && '⭐ '}
-                        {member.name}
-                      </span>
-                    </label>
-                    
-                    {isSelected && (
-                      <label className="flex items-center gap-2 ml-8 mt-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={isSelfPaid}
-                          onChange={() => handleSelfPaidToggle(member.id)}
-                          className="w-4 h-4 text-gray-600 rounded focus:ring-gray-500"
-                        />
-                        <span className="text-sm text-gray-700">
-                          Platil si sám
-                        </span>
-                      </label>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <MemberSelector
+          members={members}
+          selectedMemberIds={form.selectedMemberIds}
+          selfPaidMemberIds={form.selfPaidMemberIds}
+          onMemberToggle={form.handleMemberToggle}
+          onSelfPaidToggle={form.handleSelfPaidToggle}
+        />
 
-        {/* Payment Info */}
-        <div className="card mb-4">
-          <h2 className="text-lg font-semibold mb-4">Platba</h2>
+        <PayerSection
+          members={members}
+          selectedMemberIds={form.selectedMemberIds}
+          payerId={form.eventData.payerId}
+          onPayerChange={(payerId) => form.setEventData({ ...form.eventData, payerId })}
+          totalAmount={form.eventData.totalAmount}
+          tip={form.eventData.tip}
+          onTotalAmountChange={(totalAmount) => form.setEventData({ ...form.eventData, totalAmount })}
+          onTipChange={(tip) => form.setEventData({ ...form.eventData, tip })}
+        />
 
-          <div className="mb-4">
-            <label className="label">Kdo zaplatil</label>
-            <select
-              value={eventData.payerId}
-              onChange={(e) => setEventData({ ...eventData, payerId: e.target.value })}
-              className="input"
-              required
-            >
-              <option value="">Vyberte platiče</option>
-              {selectedMemberIds.map(memberId => {
-                const member = members.find(m => m.id === memberId);
-                return (
-                  <option key={memberId} value={memberId}>
-                    {member?.name}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-
-          {/* Payer info display */}
-          {eventData.payerId && (() => {
-            const payer = members.find(m => m.id === eventData.payerId);
-            if (!payer) return null;
-            
-            const hasPaymentInfo = payer.revolutUsername || payer.bankAccount;
-            
-            return (
-              <div className={`p-3 rounded-lg mb-4 ${hasPaymentInfo ? 'bg-green-50 border border-green-300' : 'bg-yellow-50 border border-yellow-300'}`}>
-                <div className="font-medium text-gray-900 mb-2">Platič: {payer.name}</div>
-                {payer.revolutUsername && (
-                  <div className="text-sm text-gray-700">
-                    💰 Revolut: {payer.revolutUsername.startsWith('@') ? payer.revolutUsername : `@${payer.revolutUsername}`}
-                  </div>
-                )}
-                {payer.bankAccount && (
-                  <div className="text-sm text-gray-700">
-                    🏦 Účet: {payer.bankAccount}
-                  </div>
-                )}
-                {!hasPaymentInfo && (
-                  <div className="text-sm text-orange-700 mt-2">
-                    ⚠️ Platič nemá nastavený Revolut ani číslo účtu
-                    <Link to="/members" className="ml-2 underline text-orange-800">
-                      Upravit člena
-                    </Link>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="label">Celková částka (Kč)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={eventData.totalAmount}
-                onChange={(e) => setEventData({ ...eventData, totalAmount: e.target.value })}
-                className="input"
-                placeholder="např. 2500"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="label">Dýško (Kč)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={eventData.tip}
-                onChange={(e) => setEventData({ ...eventData, tip: e.target.value })}
-                className="input"
-                placeholder="např. 200"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Receipt Items (Optional) */}
-        <div className="card mb-6">
-          <h2 className="text-lg font-semibold mb-4">Produkty z účtenky</h2>
-
-          <div className="mb-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={hasReceipt}
-                onChange={(e) => setHasReceipt(e.target.checked)}
-                className="w-5 h-5 text-primary-600 rounded focus:ring-primary-500"
-              />
-              <span className="text-sm text-gray-700">
-                Mám účtenku s konkrétními produkty (varianta A)
-              </span>
-            </label>
-          </div>
-
-          {hasReceipt && (
-            <>
-              {menuItems.length === 0 ? (
-                <p className="text-gray-500">
-                  Zatím nemáte žádné položky v jídelním lístku. <Link to="/menu" className="text-primary-600 underline">Přidejte položky</Link>
-                </p>
-              ) : (
-                <>
-                  <div className="space-y-2 mb-4">
-                    {presetItems.map((item, index) => {
-                      const menuItem = menuItems.find(mi => mi.id === item.menuItemId);
-                      const itemTotal = menuItem ? menuItem.price * item.quantity : 0;
-                      
-                      return (
-                        <div key={index} className="flex gap-2 items-center bg-gray-50 p-2 rounded">
-                          <select
-                            value={item.menuItemId}
-                            onChange={(e) => handleUpdatePresetItem(index, 'menuItemId', e.target.value)}
-                            className="input flex-1"
-                          >
-                            {menuItems.map(mi => (
-                              <option key={mi.id} value={mi.id}>
-                                {mi.name} ({mi.price} Kč)
-                              </option>
-                            ))}
-                          </select>
-                          
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.quantity}
-                            onChange={(e) => handleUpdatePresetItem(index, 'quantity', e.target.value)}
-                            className="input w-20"
-                          />
-                          
-                          <span className="text-sm text-gray-600 w-24">
-                            = {itemTotal.toFixed(2)} Kč
-                          </span>
-                          
-                          <button
-                            type="button"
-                            onClick={() => handleRemovePresetItem(index)}
-                            className="btn btn-danger text-sm"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleAddPresetItem}
-                    className="btn btn-secondary w-full mb-4"
-                  >
-                    + Přidat položku
-                  </button>
-
-                  {presetItems.length > 0 && (
-                    <div className="bg-gray-100 p-3 rounded-lg">
-                      <div className="flex justify-between text-sm">
-                        <span className="font-medium">Součet produktů:</span>
-                        <span className="font-semibold">{presetItemsTotal.toFixed(2)} Kč</span>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </div>
+        <PresetItemsEditor
+          menuItems={menuItems}
+          presetItems={form.presetItems}
+          hasReceipt={form.hasReceipt}
+          onHasReceiptChange={form.setHasReceipt}
+          onAddItem={form.handleAddPresetItem}
+          onUpdateItem={form.handleUpdatePresetItem}
+          onRemoveItem={form.handleRemovePresetItem}
+          presetItemsTotal={form.presetItemsTotal}
+        />
 
         {/* Submit */}
         <button type="submit" className="btn btn-primary w-full text-lg py-4">

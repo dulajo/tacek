@@ -1,5 +1,15 @@
 import { Event, MemberConsumption, MenuItem, EventItem, MemberBalance, EventSummary } from '../types/models';
 
+export function isConsumptionPaid(
+  consumption: { memberId: string; hasPaid?: boolean },
+  event: { payerId?: string; selfPaidMemberIds?: string[] }
+): boolean {
+  if (consumption.hasPaid) return true;
+  if (event.selfPaidMemberIds?.includes(consumption.memberId)) return true;
+  if (consumption.memberId === event.payerId) return true;
+  return false;
+}
+
 /**
  * Business logic pro výpočty částek a rozdělení nákladů
  */
@@ -254,4 +264,45 @@ export function getInventoryStatus(remaining: number, total: number): {
   } else {
     return { color: 'red', label: 'Málo' };
   }
+}
+
+/**
+ * Vypočte "přečerpání" (overdraft) pro danou položku
+ * Vrátí kladné číslo pokud je rozděleno více než je na účtence
+ */
+export function calculateItemOverdraft(
+  menuItemId: string,
+  presetItems: EventItem[],
+  consumptions: MemberConsumption[]
+): number {
+  const preset = presetItems.find(i => i.menuItemId === menuItemId)?.quantity || 0;
+  const consumed = consumptions.reduce((sum, c) => {
+    const item = c.items.find(i => i.menuItemId === menuItemId);
+    return sum + (item?.quantity || 0);
+  }, 0);
+  
+  const overdraft = consumed - preset;
+  return overdraft > 0 ? overdraft : 0;
+}
+
+/**
+ * Vypočte celkové přečerpání pro všechny položky v události
+ * Vrátí pole položek s přečerpáním
+ */
+export function calculateAllOverdrafts(
+  presetItems: EventItem[],
+  consumptions: MemberConsumption[],
+  menuItems: MenuItem[]
+): { menuItemId: string; itemName: string; overdraft: number }[] {
+  return presetItems
+    .map(preset => {
+      const overdraft = calculateItemOverdraft(preset.menuItemId, presetItems, consumptions);
+      const menuItem = menuItems.find(mi => mi.id === preset.menuItemId);
+      return {
+        menuItemId: preset.menuItemId,
+        itemName: menuItem?.name || 'Neznámá položka',
+        overdraft,
+      };
+    })
+    .filter(item => item.overdraft > 0);
 }

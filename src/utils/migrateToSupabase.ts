@@ -22,9 +22,9 @@ export async function migrateLocalStorageToSupabase() {
       try {
         await supabaseRepo.addMember(member);
         console.log(`  ✅ Migrated member: ${member.name}`);
-      } catch (error: any) {
+      } catch (error: unknown) {
         // Skip if already exists (duplicate key error)
-        if (error.code === '23505') {
+        if (error instanceof Object && 'code' in error && error.code === '23505') {
           console.log(`  ⏭️  Member already exists: ${member.name}`);
         } else {
           throw error;
@@ -40,8 +40,8 @@ export async function migrateLocalStorageToSupabase() {
       try {
         await supabaseRepo.addMenuItem(item);
         console.log(`  ✅ Migrated menu item: ${item.name}`);
-      } catch (error: any) {
-        if (error.code === '23505') {
+      } catch (error: unknown) {
+        if (error instanceof Object && 'code' in error && error.code === '23505') {
           console.log(`  ⏭️  Menu item already exists: ${item.name}`);
         } else {
           throw error;
@@ -64,12 +64,12 @@ export async function migrateLocalStorageToSupabase() {
           try {
             await supabaseRepo.updateConsumption(consumption);
             console.log(`    ✅ Migrated consumption for member: ${consumption.memberId}`);
-          } catch (error: any) {
+          } catch (error: unknown) {
             console.error(`    ❌ Failed to migrate consumption:`, error);
           }
         }
-      } catch (error: any) {
-        if (error.code === '23505') {
+      } catch (error: unknown) {
+        if (error instanceof Object && 'code' in error && error.code === '23505') {
           console.log(`  ⏭️  Event already exists: ${event.name || event.date.toLocaleDateString()}`);
         } else {
           throw error;
@@ -99,5 +99,5 @@ export async function migrateLocalStorageToSupabase() {
 
 // Export pro použití v browser console
 if (typeof window !== 'undefined') {
-  (window as any).migrateToSupabase = migrateLocalStorageToSupabase;
+  (window as unknown as Record<string, typeof migrateLocalStorageToSupabase>).migrateToSupabase = migrateLocalStorageToSupabase;
 }

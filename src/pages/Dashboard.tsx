@@ -3,12 +3,64 @@ import { useApp } from '../contexts/AppContext';
 import { format } from 'date-fns';
 import { TEXTS } from '../constants/texts';
 import { Logo } from '../components/Logo';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { MemberConsumption } from '../types/models';
+import { isConsumptionPaid } from '../services/calculationService';
 
 export default function Dashboard() {
-  const { members, events } = useApp();
+  const { members, events, repository } = useApp();
+  const [eventConsumptions, setEventConsumptions] = useState<Record<string, MemberConsumption[]>>({});
 
   const coreMembers = members.filter(m => m.isCore);
   const substituteMembers = members.filter(m => !m.isCore);
+
+  // Load consumptions for all events
+  useEffect(() => {
+    const loadAllConsumptions = async () => {
+      if (events.length === 0) return;
+      
+      try {
+        // Load all consumptions in parallel for better performance
+        const consumptionsPromises = events.map(event => 
+          repository.getEventConsumptions(event.id)
+            .then(consumptions => ({ eventId: event.id, consumptions }))
+            .catch(error => {
+              console.error(`Failed to load consumptions for event ${event.id}:`, error);
+              return { eventId: event.id, consumptions: [] };
+            })
+        );
+        
+        const results = await Promise.all(consumptionsPromises);
+        
+        const consumptionsMap: Record<string, MemberConsumption[]> = {};
+        results.forEach(({ eventId, consumptions }) => {
+          consumptionsMap[eventId] = consumptions;
+        });
+        
+        setEventConsumptions(consumptionsMap);
+      } catch (error) {
+        console.error('Failed to load event consumptions:', error);
+      }
+    };
+
+    loadAllConsumptions();
+  }, [events, repository]);
+
+  // Helper function to get unpaid members for an event (memoized)
+  const getUnpaidMembers = useCallback((eventId: string): string[] => {
+    const event = events.find(e => e.id === eventId);
+    if (!event) return [];
+    
+    const consumptions = eventConsumptions[eventId] || [];
+    
+    const unpaidMemberIds = consumptions
+      .filter(c => !isConsumptionPaid(c, event))
+      .map(c => c.memberId);
+    
+    return unpaidMemberIds
+      .map(id => members.find(m => m.id === id)?.name)
+      .filter((name): name is string => !!name);
+  }, [events, eventConsumptions, members]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50">
@@ -99,42 +151,65 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-4">
-              {events.map(event => (
-                <Link
-                  key={event.id}
-                  to={`/event/${event.id}`}
-                  className="card hover:shadow-xl transition-shadow block group"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <div className="flex-1">
-                      <h3 className="heading-3 group-hover:text-primary-600 transition-colors">
-                        {event.name || 'Událost bez názvu'}
-                      </h3>
-                      <p className="text-sm text-gray-500 font-medium mt-1">
-                        📅 {format(new Date(event.date), 'dd.MM.yyyy')}
-                      </p>
+              {events.map(event => {
+                const isClosed = event.status === 'closed';
+                const unpaidMembers = getUnpaidMembers(event.id);
+                const allPaid = unpaidMembers.length === 0;
+                
+                return (
+                  <Link
+                    key={event.id}
+                    to={`/event/${event.id}`}
+                    className={`card hover:shadow-xl transition-all block group ${
+                      isClosed ? 'opacity-60 grayscale hover:opacity-80 hover:grayscale-0' : ''
+                    }`}
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex-1">
+                        <h3 className={`heading-3 transition-colors ${
+                          isClosed 
+                            ? 'text-gray-500 group-hover:text-gray-700' 
+                            : 'group-hover:text-primary-600'
+                        }`}>
+                          {event.name || 'Událost bez názvu'}
+                        </h3>
+                        <p className="text-sm text-gray-500 font-medium mt-1">
+                          📅 {format(new Date(event.date), 'dd.MM.yyyy')}
+                        </p>
+                        
+                        {/* Payment status */}
+                        {allPaid ? (
+                          <p className="text-sm text-green-600 font-medium mt-1">
+                            ✓ Všichni zaplatili
+                          </p>
+                        ) : (
+                          <p className="text-sm text-red-600 font-medium mt-1">
+                            ⏳ Nezaplaceno: {unpaidMembers.join(', ')}
+                          </p>
+                        )}
+                      </div>
+                      <span
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide ${
+                          event.status === 'open'
+                            ? 'bg-green-100 text-green-700 border border-green-200'
+                            : 'bg-gray-100 text-gray-600 border border-gray-200'
+                        }`}
+                      >
+                        {event.status === 'open' ? TEXTS.labels.open : TEXTS.labels.closed}
+                      </span>
                     </div>
-                    <span
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide ${
-                        event.status === 'open'
-                          ? 'bg-green-100 text-green-700 border border-green-200'
-                          : 'bg-gray-100 text-gray-600 border border-gray-200'
-                      }`}
-                    >
-                      {event.status === 'open' ? TEXTS.labels.open : TEXTS.labels.closed}
-                    </span>
-                  </div>
 
-                  <div className="flex gap-6 text-sm">
-                    <span className="flex items-center gap-1.5 text-gray-600 font-medium">
-                      <span className="text-lg">👥</span> {event.presentMemberIds.length} členů
-                    </span>
-                    <span className="flex items-center gap-1.5 text-gray-600 font-medium">
-                      <span className="text-lg">💰</span> {event.totalAmount.toFixed(2)} Kč
-                    </span>
-                  </div>
-                </Link>
-              ))}
+                    <div className="flex gap-6 text-sm">
+                      <span className="flex items-center gap-1.5 text-gray-600 font-medium">
+                        <span className="text-lg">👥</span> {event.presentMemberIds.length} členů
+                      </span>
+                      <span className="flex items-center gap-1.5 text-gray-600 font-medium">
+                        <span className="text-lg">💰</span> {event.totalAmount.toFixed(2)} Kč
+                      </span>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           )}
         </section>

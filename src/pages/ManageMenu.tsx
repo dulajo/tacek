@@ -4,6 +4,17 @@ import { useApp } from '../contexts/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import { MenuItem } from '../types/models';
 import { TEXTS, formatText } from '../constants/texts';
+import { Button } from '../components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
 
 export default function ManageMenu() {
   const { menuItems, repository, refreshMenuItems } = useApp();
@@ -24,6 +35,7 @@ export default function ManageMenu() {
     isShared: false,
     isFavorite: false,
   });
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,9 +87,6 @@ export default function ManageMenu() {
   };
 
   const handleDelete = async (id: string) => {
-    const item = menuItems.find(m => m.id === id);
-    if (!item) return;
-    if (!confirm(formatText(TEXTS.warnings.deleteMenuItem, { item: item.name }))) return;
     await repository.deleteMenuItem(id);
     await refreshMenuItems();
   };
@@ -124,7 +133,7 @@ export default function ManageMenu() {
                     />
                     <select
                       value={editItem.category}
-                      onChange={(e) => setEditItem({ ...editItem, category: e.target.value as any })}
+                      onChange={(e) => setEditItem({ ...editItem, category: e.target.value as MenuItem['category'] })}
                       className="input"
                     >
                       <option value="food">Jídlo</option>
@@ -181,7 +190,7 @@ export default function ManageMenu() {
                     <button onClick={() => handleEdit(item)} className="btn btn-secondary text-sm">
                       Upravit
                     </button>
-                    <button onClick={() => handleDelete(item.id)} className="btn btn-danger text-sm">
+                    <button onClick={() => setDeletingItemId(item.id)} className="btn btn-danger text-sm">
                       Smazat
                     </button>
                   </div>
@@ -242,7 +251,7 @@ export default function ManageMenu() {
             <label className="label">Kategorie</label>
             <select
               value={newItem.category}
-              onChange={(e) => setNewItem({ ...newItem, category: e.target.value as any })}
+              onChange={(e) => setNewItem({ ...newItem, category: e.target.value as MenuItem['category'] })}
               className="input"
             >
               <option value="drink">Pití</option>
@@ -299,6 +308,28 @@ export default function ManageMenu() {
           </>
         )}
       </div>
+
+      <AlertDialog open={!!deletingItemId} onOpenChange={(open) => !open && setDeletingItemId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Smazat položku</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletingItemId && formatText(TEXTS.warnings.deleteMenuItem, { item: menuItems.find(m => m.id === deletingItemId)?.name ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild>
+              <Button variant="outline">Zrušit</Button>
+            </AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button variant="destructive" onClick={() => {
+                if (deletingItemId) handleDelete(deletingItemId);
+                setDeletingItemId(null);
+              }}>Smazat</Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

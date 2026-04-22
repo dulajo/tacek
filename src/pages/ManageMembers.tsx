@@ -1,13 +1,24 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import { Member } from '../types/models';
 import { TEXTS, formatText } from '../constants/texts';
+import MemberListItem from '../components/MemberListItem';
+import { Button } from '../components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
 
 export default function ManageMembers() {
   const { members, repository, refreshMembers } = useApp();
-  const navigate = useNavigate();
 
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberIsCore, setNewMemberIsCore] = useState(true);
@@ -18,6 +29,7 @@ export default function ManageMembers() {
   const [editIsCore, setEditIsCore] = useState(false);
   const [editRevolutUsername, setEditRevolutUsername] = useState('');
   const [editBankAccount, setEditBankAccount] = useState('');
+  const [deletingMemberId, setDeletingMemberId] = useState<string | null>(null);
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,9 +79,6 @@ export default function ManageMembers() {
   };
 
   const handleDelete = async (id: string) => {
-    const member = members.find(m => m.id === id);
-    if (!member) return;
-    if (!confirm(formatText(TEXTS.warnings.deleteMember, { name: member.name }))) return;
     await repository.deleteMember(id);
     await refreshMembers();
   };
@@ -153,81 +162,24 @@ export default function ManageMembers() {
           <h2 className="text-lg font-semibold mb-4">Pravidelní členové ⭐</h2>
           <div className="space-y-2">
             {coreMembers.map(member => (
-              <div
+              <MemberListItem
                 key={member.id}
-                className="flex items-start justify-between p-3 bg-primary-50 rounded-lg"
-              >
-                {editingId === member.id ? (
-                  <div className="flex-1">
-                    <div className="flex gap-2 mb-2">
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="input flex-1"
-                        placeholder="Jméno"
-                      />
-                      <label className="flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          checked={editIsCore}
-                          onChange={(e) => setEditIsCore(e.target.checked)}
-                          className="w-4 h-4"
-                        />
-                        <span className="text-sm">⭐</span>
-                      </label>
-                    </div>
-                    <div className="flex gap-2 mb-2">
-                      <input
-                        type="text"
-                        value={editRevolutUsername}
-                        onChange={(e) => setEditRevolutUsername(e.target.value)}
-                        className="input flex-1 text-sm"
-                        placeholder="Revolut username"
-                      />
-                      <input
-                        type="text"
-                        value={editBankAccount}
-                        onChange={(e) => setEditBankAccount(e.target.value)}
-                        className="input flex-1 text-sm"
-                        placeholder="Číslo účtu"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={handleSaveEdit} className="btn btn-success flex-1">
-                        {TEXTS.buttons.save}
-                      </button>
-                      <button onClick={() => setEditingId(null)} className="btn btn-secondary flex-1">
-                        {TEXTS.buttons.cancel}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex-1">
-                      <div className="font-medium text-gray-900">{member.name}</div>
-                      {(member.revolutUsername || member.bankAccount) && (
-                        <div className="text-xs text-gray-600 mt-1 space-y-0.5">
-                          {member.revolutUsername && (
-                            <div>💰 Revolut: {member.revolutUsername.startsWith('@') ? member.revolutUsername : `@${member.revolutUsername}`}</div>
-                          )}
-                          {member.bankAccount && (
-                            <div>🏦 Účet: {member.bankAccount}</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => handleEdit(member)} className="btn btn-secondary text-sm">
-                        {TEXTS.buttons.edit}
-                      </button>
-                      <button onClick={() => handleDelete(member.id)} className="btn btn-danger text-sm">
-                        {TEXTS.buttons.delete}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+                member={member}
+                isEditing={editingId === member.id}
+                bgColorClass="bg-primary-50"
+                editName={editName}
+                editIsCore={editIsCore}
+                editRevolutUsername={editRevolutUsername}
+                editBankAccount={editBankAccount}
+                onEditNameChange={setEditName}
+                onEditIsCoreChange={setEditIsCore}
+                onEditRevolutUsernameChange={setEditRevolutUsername}
+                onEditBankAccountChange={setEditBankAccount}
+                onSave={handleSaveEdit}
+                onCancel={() => setEditingId(null)}
+                onEdit={handleEdit}
+                onDelete={(id) => setDeletingMemberId(id)}
+              />
             ))}
           </div>
         </div>
@@ -239,81 +191,24 @@ export default function ManageMembers() {
           <h2 className="text-lg font-semibold mb-4">Náhradníci</h2>
           <div className="space-y-2">
             {substituteMembers.map(member => (
-              <div
+              <MemberListItem
                 key={member.id}
-                className="flex items-start justify-between p-3 bg-gray-50 rounded-lg"
-              >
-                {editingId === member.id ? (
-                  <div className="flex-1">
-                    <div className="flex gap-2 mb-2">
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="input flex-1"
-                        placeholder="Jméno"
-                      />
-                      <label className="flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          checked={editIsCore}
-                          onChange={(e) => setEditIsCore(e.target.checked)}
-                          className="w-4 h-4"
-                        />
-                        <span className="text-sm">⭐</span>
-                      </label>
-                    </div>
-                    <div className="flex gap-2 mb-2">
-                      <input
-                        type="text"
-                        value={editRevolutUsername}
-                        onChange={(e) => setEditRevolutUsername(e.target.value)}
-                        className="input flex-1 text-sm"
-                        placeholder="Revolut username"
-                      />
-                      <input
-                        type="text"
-                        value={editBankAccount}
-                        onChange={(e) => setEditBankAccount(e.target.value)}
-                        className="input flex-1 text-sm"
-                        placeholder="Číslo účtu"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={handleSaveEdit} className="btn btn-success flex-1">
-                        {TEXTS.buttons.save}
-                      </button>
-                      <button onClick={() => setEditingId(null)} className="btn btn-secondary flex-1">
-                        {TEXTS.buttons.cancel}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex-1">
-                      <div className="font-medium text-gray-900">{member.name}</div>
-                      {(member.revolutUsername || member.bankAccount) && (
-                        <div className="text-xs text-gray-600 mt-1 space-y-0.5">
-                          {member.revolutUsername && (
-                            <div>💰 Revolut: {member.revolutUsername.startsWith('@') ? member.revolutUsername : `@${member.revolutUsername}`}</div>
-                          )}
-                          {member.bankAccount && (
-                            <div>🏦 Účet: {member.bankAccount}</div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => handleEdit(member)} className="btn btn-secondary text-sm">
-                        {TEXTS.buttons.edit}
-                      </button>
-                      <button onClick={() => handleDelete(member.id)} className="btn btn-danger text-sm">
-                        {TEXTS.buttons.delete}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+                member={member}
+                isEditing={editingId === member.id}
+                bgColorClass="bg-gray-50"
+                editName={editName}
+                editIsCore={editIsCore}
+                editRevolutUsername={editRevolutUsername}
+                editBankAccount={editBankAccount}
+                onEditNameChange={setEditName}
+                onEditIsCoreChange={setEditIsCore}
+                onEditRevolutUsernameChange={setEditRevolutUsername}
+                onEditBankAccountChange={setEditBankAccount}
+                onSave={handleSaveEdit}
+                onCancel={() => setEditingId(null)}
+                onEdit={handleEdit}
+                onDelete={(id) => setDeletingMemberId(id)}
+              />
             ))}
           </div>
         </div>
@@ -324,6 +219,28 @@ export default function ManageMembers() {
           <p className="text-gray-500">{TEXTS.errors.noMembers}</p>
         </div>
       )}
+
+      <AlertDialog open={!!deletingMemberId} onOpenChange={(open) => !open && setDeletingMemberId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Smazat člena</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletingMemberId && formatText(TEXTS.warnings.deleteMember, { name: members.find(m => m.id === deletingMemberId)?.name ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild>
+              <Button variant="outline">Zrušit</Button>
+            </AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button variant="destructive" onClick={() => {
+                if (deletingMemberId) handleDelete(deletingMemberId);
+                setDeletingMemberId(null);
+              }}>Smazat</Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

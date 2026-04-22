@@ -1,4 +1,6 @@
-export function Logo({ size = 'normal' }: { size?: 'small' | 'normal' | 'large' }) {
+import React from 'react';
+
+export const Logo = React.memo(({ size = 'normal' }: { size?: 'small' | 'normal' | 'large' }) => {
   const sizes = {
     small: {
       container: 'gap-2',
@@ -35,4 +37,6 @@ export function Logo({ size = 'normal' }: { size?: 'small' | 'normal' | 'large' 
       </div>
     </div>
   );
-}
+});
+
+Logo.displayName = 'Logo';

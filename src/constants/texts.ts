@@ -236,6 +236,6 @@ export const TEXTS = {
  * Helper pro formátování textu s parametry
  * Použití: formatText(TEXTS.errors.noRevolutUsername, { name: 'Pepa' })
  */
-export function formatText(template: string, params: Record<string, any>): string {
+export function formatText(template: string, params: Record<string, string | number | boolean>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => params[key]?.toString() || '');
 }

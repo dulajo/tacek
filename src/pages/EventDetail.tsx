@@ -1,24 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useApp } from '../contexts/AppContext';
-import { MemberConsumption, EventItem } from '../types/models';
-import { calculateEventSummary, calculateItemsTotal, getRemainingQuantity, getInventoryStatus } from '../services/calculationService';
+import { Event, MemberConsumption, EventItem } from '../types/models';
+import { calculateEventSummary, calculateItemsTotal, calculateAllOverdrafts, isConsumptionPaid } from '../services/calculationService';
+import { formatRevolutUsername } from '../utils/formatters';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 import { LoadingBar } from '../components/LoadingBar';
+import { ConsumptionForm } from '../components/ConsumptionForm';
 import { TEXTS } from '../constants/texts';
+import { Button } from '../components/ui/button';
+import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
+import { Edit, Trash2, CheckCircle, XCircle } from 'lucide-react';
 
 export default function EventDetail() {
   const { eventId } = useParams<{ eventId: string }>();
   const { members, menuItems, repository, refreshEvents } = useApp();
   const navigate = useNavigate();
 
-  const [event, setEvent] = useState<any>(null);
+  const [event, setEvent] = useState<Event | null>(null);
   const [consumptions, setConsumptions] = useState<MemberConsumption[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>('');
   const [expandedMemberId, setExpandedMemberId] = useState<string | null>(null);
   const [editingItems, setEditingItems] = useState<EventItem[]>([]);
   const [editingSharedIds, setEditingSharedIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [showAutoCloseDialog, setShowAutoCloseDialog] = useState(false);
+  const [showCloseWithUnpaidDialog, setShowCloseWithUnpaidDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [unpaidMemberNames, setUnpaidMemberNames] = useState<string[]>([]);
 
   useEffect(() => {
     loadEventData();
@@ -28,46 +47,51 @@ export default function EventDetail() {
     if (!eventId) return;
     
     setIsLoading(true);
-    const eventData = await repository.getEvent(eventId);
-    const consumptionData = await repository.getEventConsumptions(eventId);
-    
-    setEvent(eventData);
-    setConsumptions(consumptionData);
-    
-    // Initialize consumptions for all present members if not exist
-    if (eventData) {
-      for (const memberId of eventData.presentMemberIds) {
-        const existing = consumptionData.find(c => c.memberId === memberId);
-        if (!existing) {
-          const newConsumption: MemberConsumption = {
-            eventId: eventId,
-            memberId: memberId,
-            items: [],
-            sharedItemIds: [],
-            paidEntryFeeForIds: [],
-            hasPaid: false,
-            totalAmount: 0,
-          };
-          await repository.updateConsumption(newConsumption);
-          consumptionData.push(newConsumption);
+    try {
+      const eventData = await repository.getEvent(eventId);
+      const consumptionData = await repository.getEventConsumptions(eventId);
+      
+      setEvent(eventData);
+      setConsumptions(consumptionData);
+      
+      // Initialize consumptions for all present members if not exist
+      if (eventData) {
+        for (const memberId of eventData.presentMemberIds) {
+          const existing = consumptionData.find(c => c.memberId === memberId);
+          if (!existing) {
+            const newConsumption: MemberConsumption = {
+              eventId: eventId,
+              memberId: memberId,
+              items: [],
+              sharedItemIds: [],
+              paidEntryFeeForIds: [],
+              hasPaid: false,
+              totalAmount: 0,
+            };
+            await repository.updateConsumption(newConsumption);
+            consumptionData.push(newConsumption);
+          }
         }
+        setConsumptions([...consumptionData]);
       }
-      setConsumptions([...consumptionData]);
+    } catch (error) {
+      console.error('Failed to load event data:', error);
+      toast.error('Nepodařilo se načíst událost');
+    } finally {
+      setIsLoading(false);
     }
-    
-    setIsLoading(false);
   };
 
-  const handleSelectMember = (memberId: string) => {
+  const handleSelectMember = useCallback((memberId: string) => {
     const consumption = consumptions.find(c => c.memberId === memberId);
     setSelectedMemberId(memberId);
     setEditingItems(consumption?.items || []);
     setEditingSharedIds(consumption?.sharedItemIds || []);
     // Close expanded member if any
     setExpandedMemberId(null);
-  };
+  }, [consumptions]);
 
-  const handleToggleMemberExpansion = (memberId: string) => {
+  const handleToggleMemberExpansion = useCallback((memberId: string) => {
     if (expandedMemberId === memberId) {
       // Close if already expanded
       setExpandedMemberId(null);
@@ -82,28 +106,35 @@ export default function EventDetail() {
       // Close the bottom form if open
       setSelectedMemberId('');
     }
-  };
+  }, [expandedMemberId, consumptions]);
 
-  const handleSaveExpandedConsumption = async (memberId: string) => {
-    if (!eventId) return;
+  const handleSaveConsumption = async (memberId: string) => {
+    if (!memberId || !eventId) return;
 
     const consumption = consumptions.find(c => c.memberId === memberId);
     if (!consumption) return;
 
-    const updatedConsumption: MemberConsumption = {
-      ...consumption,
-      items: editingItems,
-      sharedItemIds: editingSharedIds,
-    };
+    try {
+      const updatedConsumption: MemberConsumption = {
+        ...consumption,
+        items: editingItems,
+        sharedItemIds: editingSharedIds,
+      };
 
-    await repository.updateConsumption(updatedConsumption);
-    await loadEventData();
-    setExpandedMemberId(null);
-    setEditingItems([]);
-    setEditingSharedIds([]);
+      await repository.updateConsumption(updatedConsumption);
+      await loadEventData();
+      setExpandedMemberId(null);
+      setSelectedMemberId('');
+      setEditingItems([]);
+      setEditingSharedIds([]);
+      toast.success('Spotřeba uložena');
+    } catch (error) {
+      console.error('Failed to save consumption:', error);
+      toast.error('Nepodařilo se uložit spotřebu');
+    }
   };
 
-  const handleItemQuantityChange = (menuItemId: string, delta: number) => {
+  const handleItemQuantityChange = useCallback((menuItemId: string, delta: number) => {
     const existingIndex = editingItems.findIndex(i => i.menuItemId === menuItemId);
     let newItems = [...editingItems];
 
@@ -119,46 +150,159 @@ export default function EventDetail() {
     }
 
     setEditingItems(newItems);
-  };
+  }, [editingItems]);
 
-  const handleToggleSharedItem = (menuItemId: string) => {
+  const handleToggleSharedItem = useCallback((menuItemId: string) => {
     if (editingSharedIds.includes(menuItemId)) {
       setEditingSharedIds(editingSharedIds.filter(id => id !== menuItemId));
     } else {
       setEditingSharedIds([...editingSharedIds, menuItemId]);
     }
-  };
+  }, [editingSharedIds]);
 
-  const handleSaveConsumption = async () => {
-    if (!selectedMemberId || !eventId) return;
+  const isConsumptionPaidForEvent = useCallback((consumption: MemberConsumption, currentEvent: typeof event): boolean => {
+    if (!currentEvent) return true;
+    return isConsumptionPaid(consumption, currentEvent);
+  }, []);
 
-    const consumption = consumptions.find(c => c.memberId === selectedMemberId);
-    if (!consumption) return;
+  // All useMemo hooks MUST be before any conditional returns
+  const payer = useMemo(() => members.find(m => m.id === event?.payerId), [members, event?.payerId]);
+  
+  const summary = useMemo(() => 
+    event ? calculateEventSummary(event, consumptions, menuItems, members) : null,
+    [event, consumptions, menuItems, members]
+  );
+  
+  // Sort member balances alphabetically by name for consistent ordering
+  const sortedMemberBalances = useMemo(() => 
+    summary ? [...summary.memberBalances].sort((a, b) => 
+      a.memberName.localeCompare(b.memberName, 'cs-CZ')
+    ) : [],
+    [summary]
+  );
+  
+  const sharedItems = useMemo(() => 
+    menuItems.filter(mi => mi.isShared),
+    [menuItems]
+  );
 
-    const updatedConsumption: MemberConsumption = {
-      ...consumption,
-      items: editingItems,
-      sharedItemIds: editingSharedIds,
-    };
+  // Sort menu items: favorites first, then alphabetically within each group
+  const sortedMenuItems = useMemo(() => 
+    [...menuItems]
+      .filter(mi => !mi.isShared)
+      .sort((a, b) => {
+        if (a.isFavorite && !b.isFavorite) return -1;
+        if (!a.isFavorite && b.isFavorite) return 1;
+        return a.name.localeCompare(b.name);
+      }),
+    [menuItems]
+  );
+  
+  const favoriteItems = useMemo(() => 
+    sortedMenuItems.filter(mi => mi.isFavorite),
+    [sortedMenuItems]
+  );
+  
+  const regularItems = useMemo(() => 
+    sortedMenuItems.filter(mi => !mi.isFavorite),
+    [sortedMenuItems]
+  );
 
-    await repository.updateConsumption(updatedConsumption);
-    await loadEventData();
-    setSelectedMemberId('');
-    setEditingItems([]);
-    setEditingSharedIds([]);
-  };
+  const editingMember = useMemo(() => 
+    members.find(m => m.id === selectedMemberId),
+    [members, selectedMemberId]
+  );
+
+  // Calculate totals for validation
+  const expectedTotal = useMemo(() => 
+    event?.presetItems 
+      ? calculateItemsTotal(event.presetItems, menuItems)
+      : (event?.totalAmount || 0) - (event?.tip || 0),
+    [event?.presetItems, event?.totalAmount, event?.tip, menuItems]
+  );
+
+  // Helper function: Calculate detailed breakdown of missing/exceeded items
+  const missingItemsBreakdown = useMemo(() => {
+    if (!event?.presetItems) return null;
+    
+    const breakdown: { name: string; diff: number }[] = [];
+    
+    event.presetItems.forEach(presetItem => {
+      const menuItem = menuItems.find(mi => mi.id === presetItem.menuItemId);
+      if (!menuItem) return;
+      
+      // For shared items: count as "consumed" if at least 1 person has it
+      if (menuItem.isShared) {
+        const participantCount = consumptions.filter(c =>
+          c.sharedItemIds.includes(presetItem.menuItemId)
+        ).length;
+        
+        // If someone has it, consider it fully consumed (diff = 0)
+        // If nobody has it, it's missing (diff = presetItem.quantity, usually 1)
+        const diff = participantCount > 0 ? 0 : presetItem.quantity;
+        
+        if (diff !== 0) {
+          breakdown.push({
+            name: menuItem.name,
+            diff: diff
+          });
+        }
+      } else {
+        // For regular items: count actual quantity consumed
+        const consumed = consumptions.reduce((sum, c) => {
+          const item = c.items.find(i => i.menuItemId === presetItem.menuItemId);
+          return sum + (item?.quantity || 0);
+        }, 0);
+        
+        const diff = presetItem.quantity - consumed;
+        
+        if (diff !== 0) {
+          breakdown.push({
+            name: menuItem.name,
+            diff: diff
+          });
+        }
+      }
+    });
+    
+    return breakdown;
+  }, [event?.presetItems, consumptions, menuItems]);
+
+
 
   const handleTogglePaid = async (memberId: string) => {
     const consumption = consumptions.find(c => c.memberId === memberId);
     if (!consumption) return;
 
-    const updatedConsumption = {
-      ...consumption,
-      hasPaid: !consumption.hasPaid,
-    };
+    try {
+      const updatedConsumption = {
+        ...consumption,
+        hasPaid: !consumption.hasPaid,
+      };
 
-    await repository.updateConsumption(updatedConsumption);
-    await loadEventData();
+      await repository.updateConsumption(updatedConsumption);
+      
+      // Check if all members paid after this toggle (only if event is still open)
+      // Do this BEFORE refreshing to avoid race conditions
+      let shouldShowDialog = false;
+      if (event?.status === 'open' && !consumption.hasPaid) {
+        // We're marking as paid, check if this was the last unpaid member
+        const updatedConsumptions = await repository.getEventConsumptions(eventId!);
+        const allPaid = updatedConsumptions.every(c => isConsumptionPaidForEvent(c, event));
+        
+        shouldShowDialog = allPaid;
+      }
+      
+      await loadEventData();
+      await refreshEvents(); // Refresh dashboard to update payment status
+      
+      if (shouldShowDialog) {
+        setShowAutoCloseDialog(true);
+      }
+    } catch (error) {
+      console.error('Failed to toggle paid status:', error);
+      toast.error('Nepodařilo se změnit status platby');
+    }
   };
 
   const handleCopySummary = async () => {
@@ -179,7 +323,7 @@ export default function EventDetail() {
     message += `\n━━━━━━━━━━━━━━━━━━━━\n\n`;
     
     // Pro každého člena
-    summary.memberBalances
+    sortedMemberBalances
       .filter(balance => !balance.isPayer)
       .forEach(balance => {
         const memberConsumption = consumptions.find(c => c.memberId === balance.memberId);
@@ -233,12 +377,12 @@ export default function EventDetail() {
     message += `━━━━━━━━━━━━━━━━━━━━\n\n`;
     
     // Zaplaceno / Čeká se
-    const paidMembers = summary.memberBalances
+    const paidMembers = sortedMemberBalances
       .filter(b => !b.isPayer && (b.hasPaid || b.paidSelf))
       .map(b => b.memberName)
       .join(', ');
     
-    const unpaidMembers = summary.memberBalances
+    const unpaidMembers = sortedMemberBalances
       .filter(b => !b.isPayer && !b.hasPaid && !b.paidSelf)
       .map(b => b.memberName)
       .join(', ');
@@ -250,7 +394,7 @@ export default function EventDetail() {
       message += `⏳ Čeká se: ${unpaidMembers}\n`;
     }
     
-    const totalToCollect = summary.memberBalances
+    const totalToCollect = sortedMemberBalances
       .filter(b => !b.isPayer && !b.paidSelf)
       .reduce((sum, b) => sum + b.totalOwed, 0);
     
@@ -259,7 +403,7 @@ export default function EventDetail() {
     // Copy to clipboard
     try {
       await navigator.clipboard.writeText(message);
-      alert(TEXTS.notifications.summaryCopied);
+      toast.success(TEXTS.notifications.summaryCopied);
     } catch (err) {
       // Fallback for older browsers
       const textArea = document.createElement('textarea');
@@ -268,9 +412,9 @@ export default function EventDetail() {
       textArea.select();
       try {
         document.execCommand('copy');
-        alert(TEXTS.notifications.summaryCopied);
+        toast.success(TEXTS.notifications.summaryCopied);
       } catch (e) {
-        alert(TEXTS.notifications.copyFailed);
+        toast.error(TEXTS.notifications.copyFailed);
       }
       document.body.removeChild(textArea);
     }
@@ -279,23 +423,75 @@ export default function EventDetail() {
   const handleToggleEventStatus = async () => {
     if (!event) return;
 
-    const updatedEvent = {
-      ...event,
-      status: event.status === 'open' ? 'closed' : 'open',
-    };
+    // If trying to close event, check for unpaid members
+    if (event.status === 'open') {
+      const unpaidMembers = consumptions
+        .filter(c => !isConsumptionPaidForEvent(c, event))
+        .map(c => members.find(m => m.id === c.memberId)?.name)
+        .filter((name): name is string => !!name);
+      
+      if (unpaidMembers.length > 0) {
+        // Show dialog asking what to do with unpaid members
+        setUnpaidMemberNames(unpaidMembers);
+        setShowCloseWithUnpaidDialog(true);
+        return;
+      }
+    }
 
-    await repository.updateEvent(updatedEvent);
-    await loadEventData();
+    // If opening event or all paid, just toggle status
+    await closeEvent();
+  };
+
+  // Actually close the event (called from dialog or directly)
+  const closeEvent = async (markAllAsPaid: boolean = false) => {
+    if (!event) return;
+
+    try {
+      // Mark all as paid if requested
+      if (markAllAsPaid) {
+        const unpaidConsumptions = consumptions.filter(c => !isConsumptionPaidForEvent(c, event));
+        // Update all consumptions in parallel for better performance
+        await Promise.all(
+          unpaidConsumptions.map(consumption => 
+            repository.updateConsumption({
+              ...consumption,
+              hasPaid: true,
+            })
+          )
+        );
+      }
+
+      const updatedEvent: Event = {
+        ...event,
+        status: event.status === 'open' ? 'closed' as const : 'open' as const,
+      };
+
+      await repository.updateEvent(updatedEvent);
+      await loadEventData();
+      await refreshEvents(); // Refresh dashboard to update event status
+      toast.success(event.status === 'open' ? 'Událost uzavřena' : 'Událost otevřena');
+      
+      // Close dialogs
+      setShowAutoCloseDialog(false);
+      setShowCloseWithUnpaidDialog(false);
+    } catch (error) {
+      console.error('Failed to toggle event status:', error);
+      toast.error('Nepodařilo se změnit status události');
+    }
   };
 
   const handleDeleteEvent = async () => {
     if (!event || !eventId) return;
     
-    if (!confirm('Opravdu chcete smazat tuto událost? Tato akce je nevratná.')) return;
-    
-    await repository.deleteEvent(eventId);
-    await refreshEvents(); // Refresh dashboard before navigating
-    navigate('/');
+    try {
+      await repository.deleteEvent(eventId);
+      await refreshEvents(); // Refresh dashboard before navigating
+      navigate('/');
+      toast.success('Událost smazána');
+    } catch (error) {
+      console.error('Failed to delete event:', error);
+      toast.error('Nepodařilo se smazat událost');
+    }
   };
 
   if (isLoading) {
@@ -313,61 +509,9 @@ export default function EventDetail() {
     );
   }
 
-  const payer = members.find(m => m.id === event.payerId);
-  const summary = calculateEventSummary(event, consumptions, menuItems, members);
-  const sharedItems = menuItems.filter(mi => mi.isShared);
-
-  // Sort menu items: favorites first, then alphabetically within each group
-  const sortedMenuItems = [...menuItems]
-    .filter(mi => !mi.isShared)
-    .sort((a, b) => {
-      if (a.isFavorite && !b.isFavorite) return -1;
-      if (!a.isFavorite && b.isFavorite) return 1;
-      return a.name.localeCompare(b.name);
-    });
-  
-  const favoriteItems = sortedMenuItems.filter(mi => mi.isFavorite);
-  const regularItems = sortedMenuItems.filter(mi => !mi.isFavorite);
-
-  const editingTotal = calculateItemsTotal(editingItems, menuItems);
-  const editingMember = members.find(m => m.id === selectedMemberId);
-
-  // Calculate totals for validation
-  const totalConsumed = summary.totalConsumed;
-  const expectedTotal = event.presetItems 
-    ? calculateItemsTotal(event.presetItems, menuItems)
-    : event.totalAmount - event.tip;
+  // These values are now computed from useMemo hooks defined above
+  const totalConsumed = summary?.totalConsumed || 0;
   const difference = expectedTotal - totalConsumed;
-
-  // Helper function: Calculate detailed breakdown of missing/exceeded items
-  const getMissingItemsBreakdown = () => {
-    if (!event.presetItems) return null;
-    
-    const breakdown: { name: string; diff: number }[] = [];
-    
-    event.presetItems.forEach(presetItem => {
-      const menuItem = menuItems.find(mi => mi.id === presetItem.menuItemId);
-      if (!menuItem) return;
-      
-      const consumed = consumptions.reduce((sum, c) => {
-        const item = c.items.find(i => i.menuItemId === presetItem.menuItemId);
-        return sum + (item?.quantity || 0);
-      }, 0);
-      
-      const diff = presetItem.quantity - consumed;
-      
-      if (diff !== 0) {
-        breakdown.push({
-          name: menuItem.name,
-          diff: diff
-        });
-      }
-    });
-    
-    return breakdown;
-  };
-
-  const missingItemsBreakdown = getMissingItemsBreakdown();
 
   return (
     <div className="max-w-4xl mx-auto p-4 pb-20">
@@ -386,24 +530,38 @@ export default function EventDetail() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Link
-              to={`/event/${eventId}/edit`}
-              className="btn btn-secondary"
+            <Button
+              asChild
+              variant="outline"
             >
-              ✏️ Upravit
-            </Link>
-            <button
-              onClick={handleDeleteEvent}
-              className="btn btn-danger"
+              <Link to={`/event/${eventId}/edit`}>
+                <Edit className="h-4 w-4" />
+                Upravit
+              </Link>
+            </Button>
+            <Button
+              onClick={() => setShowDeleteDialog(true)}
+              variant="destructive"
             >
-              🗑️ Smazat
-            </button>
-            <button
+              <Trash2 className="h-4 w-4" />
+              Smazat
+            </Button>
+            <Button
               onClick={handleToggleEventStatus}
-              className={`btn ${event.status === 'open' ? 'btn-secondary' : 'btn-success'}`}
+              variant={event.status === 'open' ? 'outline' : 'success'}
             >
-              {event.status === 'open' ? 'Uzavřít' : 'Otevřít'}
-            </button>
+              {event.status === 'open' ? (
+                <>
+                  <XCircle className="h-4 w-4" />
+                  Uzavřít
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-4 w-4" />
+                  Otevřít
+                </>
+              )}
+            </Button>
           </div>
         </div>
       </div>
@@ -418,7 +576,7 @@ export default function EventDetail() {
           </div>
           {payer?.revolutUsername && (
             <div className="text-sm text-gray-700">
-              💰 Revolut: {payer.revolutUsername.startsWith('@') ? payer.revolutUsername : `@${payer.revolutUsername}`}
+              💰 Revolut: {formatRevolutUsername(payer.revolutUsername)}
             </div>
           )}
           {payer?.bankAccount && (
@@ -431,12 +589,13 @@ export default function EventDetail() {
           </div>
           
           {/* Copy Summary Button */}
-          <button
+          <Button
             onClick={handleCopySummary}
-            className="btn btn-primary w-full mt-4"
+            variant="default"
+            className="w-full mt-4"
           >
             📋 Zkopírovat rozpis pro skupinu
-          </button>
+          </Button>
         </div>
 
         {/* Summary Grid */}
@@ -479,9 +638,9 @@ export default function EventDetail() {
                     {missingItemsBreakdown.map((item, idx) => (
                       <div key={idx} className="text-sm text-gray-700">
                         {item.diff > 0 ? (
-                          <span>• {item.name} <span className="font-medium">({item.diff}×)</span> - chybí rozdělit</span>
+                          <span>• {item.name} <span className="font-medium">({item.diff}× chybí)</span></span>
                         ) : (
-                          <span>• {item.name} <span className="font-medium text-red-700">(+{Math.abs(item.diff)}×)</span> - překročeno</span>
+                          <span>• {item.name} <span className="font-medium text-red-700">({Math.abs(item.diff)}× navíc)</span></span>
                         )}
                       </div>
                     ))}
@@ -497,11 +656,23 @@ export default function EventDetail() {
       <div className="card mb-6">
         <h2 className="text-lg font-semibold mb-4">Přehled členů</h2>
         <div className="space-y-3">
-          {summary.memberBalances.map(balance => {
+          {sortedMemberBalances.map(balance => {
             const isExpanded = expandedMemberId === balance.memberId;
             const isSelfPaid = balance.paidSelf;
             const memberConsumption = consumptions.find(c => c.memberId === balance.memberId);
             const hasItems = (memberConsumption?.items.length || 0) > 0 || (memberConsumption?.sharedItemIds.length || 0) > 0;
+            
+            // Create temp consumptions for real-time inventory display
+            const tempConsumptions = isExpanded ? consumptions.map(c => 
+              c.memberId === balance.memberId 
+                ? { ...c, items: editingItems, sharedItemIds: editingSharedIds }
+                : c
+            ) : consumptions;
+            
+            // Calculate overdrafts for this member (including current edits)
+            const currentOverdrafts = event.presetItems && isExpanded 
+              ? calculateAllOverdrafts(event.presetItems, tempConsumptions, menuItems)
+              : [];
             
             return (
               <div
@@ -615,12 +786,28 @@ export default function EventDetail() {
 
                       {/* Toggle button for consumption form */}
                       {!isSelfPaid && (
-                        <button
+                        <Button
                           onClick={() => handleToggleMemberExpansion(balance.memberId)}
-                          className={`btn w-full mt-3 text-sm ${isExpanded ? 'btn-secondary' : 'btn-primary'}`}
+                          variant={isExpanded ? 'outline' : 'default'}
+                          className="w-full mt-3"
+                          size="sm"
                         >
-                          {isExpanded ? '✓ Hotovo' : hasItems ? '✏️ Upravit konzumaci' : '➕ Přidat konzumaci'}
-                        </button>
+                          {isExpanded ? (
+                            <>
+                              <CheckCircle className="h-4 w-4" />
+                              Hotovo
+                            </>
+                          ) : hasItems ? (
+                            <>
+                              <Edit className="h-4 w-4" />
+                              Upravit konzumaci
+                            </>
+                          ) : (
+                            <>
+                              ➕ Přidat konzumaci
+                            </>
+                          )}
+                        </Button>
                       )}
                     </>
                   )}
@@ -629,243 +816,27 @@ export default function EventDetail() {
                 {/* Expanded consumption form */}
                 {isExpanded && !isSelfPaid && (
                   <div className="border-t border-gray-300 bg-white p-4">
-                    <h4 className="font-medium text-gray-700 mb-3">
-                      {hasItems ? '✏️ Upravit konzumaci' : '➕ Přidat konzumaci'}
-                    </h4>
-                    
-                    {/* Regular Items */}
-                    <div className="mb-4">
-                      <h5 className="text-sm font-medium text-gray-700 mb-2">Běžné položky:</h5>
-                      <div className="space-y-2">
-                        {/* Favorite items */}
-                        {favoriteItems.length > 0 && (
-                          <>
-                            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mt-2 mb-1">
-                              ⭐ Oblíbené
-                            </div>
-                            {favoriteItems.map(menuItem => {
-                              const currentItem = editingItems.find(i => i.menuItemId === menuItem.id);
-                              const quantity = currentItem?.quantity || 0;
-                              const total = menuItem.price * quantity;
-                              
-                              // Inventory tracking (only for Variant A)
-                              let remaining = null;
-                              let inventoryStatus = null;
-                              let isOutOfStock = false;
-                              
-                              if (event.presetItems) {
-                                remaining = getRemainingQuantity(menuItem.id, event.presetItems, consumptions);
-                                const presetItem = event.presetItems.find(pi => pi.menuItemId === menuItem.id);
-                                const total = presetItem?.quantity || 0;
-                                inventoryStatus = getInventoryStatus(remaining, total);
-                                isOutOfStock = remaining === 0;
-                              }
-                              
-                              // Hide items that are out of stock
-                              if (isOutOfStock) return null;
-
-                              return (
-                                <div key={menuItem.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 bg-yellow-50 p-2 rounded border border-yellow-200">
-                                  {/* Left: Item info */}
-                                  <div>
-                                    <div className="font-medium text-gray-900">{menuItem.name}</div>
-                                    <div className="text-sm text-gray-600">
-                                      {menuItem.price.toFixed(2)} Kč
-                                      {event.presetItems && remaining !== null && (
-                                        <span className={`ml-2 ${
-                                          inventoryStatus === 'high' ? 'text-green-600' :
-                                          inventoryStatus === 'medium' ? 'text-yellow-600' :
-                                          inventoryStatus === 'low' ? 'text-red-600' :
-                                          'text-gray-400'
-                                        }`}>
-                                          (zbývá {remaining}/{event.presetItems.find(pi => pi.menuItemId === menuItem.id)?.quantity || 0})
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                  
-                                  {/* Middle: Calculated total (shown only when quantity > 0) */}
-                                  <div className="text-sm text-gray-600 min-w-[100px] text-right">
-                                    {quantity > 0 && (
-                                      <span className="font-medium">
-                                        {quantity}× = {total.toFixed(2)} Kč
-                                      </span>
-                                    )}
-                                  </div>
-                                  
-                                  {/* Right: Buttons (always fixed position) */}
-                                  <div className="flex items-center gap-2 flex-shrink-0">
-                                    <button
-                                      onClick={() => handleItemQuantityChange(menuItem.id, -1)}
-                                      className="btn btn-secondary w-10 h-10"
-                                      disabled={quantity === 0}
-                                    >
-                                      -
-                                    </button>
-                                    <span className="w-8 text-center font-semibold">{quantity}</span>
-                                    <button
-                                      onClick={() => handleItemQuantityChange(menuItem.id, 1)}
-                                      className="btn btn-primary w-10 h-10"
-                                      disabled={event.presetItems && remaining !== null && remaining <= 0}
-                                    >
-                                      +
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </>
-                        )}
-                        
-                        {/* Regular items */}
-                        {regularItems.length > 0 && (
-                          <>
-                            {favoriteItems.length > 0 && (
-                              <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mt-4 mb-1">
-                                Ostatní
-                              </div>
-                            )}
-                            {regularItems.map(menuItem => {
-                              const currentItem = editingItems.find(i => i.menuItemId === menuItem.id);
-                              const quantity = currentItem?.quantity || 0;
-                              const total = menuItem.price * quantity;
-                              
-                              // Inventory tracking (only for Variant A)
-                              let remaining = null;
-                              let inventoryStatus = null;
-                              let isOutOfStock = false;
-                              
-                              if (event.presetItems) {
-                                remaining = getRemainingQuantity(menuItem.id, event.presetItems, consumptions);
-                                const presetItem = event.presetItems.find(pi => pi.menuItemId === menuItem.id);
-                                const total = presetItem?.quantity || 0;
-                                inventoryStatus = getInventoryStatus(remaining, total);
-                                isOutOfStock = remaining === 0;
-                              }
-                              
-                              // Hide items that are out of stock
-                              if (isOutOfStock) return null;
-
-                              return (
-                                <div key={menuItem.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 bg-gray-50 p-2 rounded">
-                                  {/* Left: Item info */}
-                                  <div>
-                                    <div className="font-medium text-gray-900">{menuItem.name}</div>
-                                    <div className="text-sm text-gray-600">
-                                      {menuItem.price.toFixed(2)} Kč
-                                      {event.presetItems && remaining !== null && (
-                                        <span className={`ml-2 ${
-                                          inventoryStatus === 'high' ? 'text-green-600' :
-                                          inventoryStatus === 'medium' ? 'text-yellow-600' :
-                                          inventoryStatus === 'low' ? 'text-red-600' :
-                                          'text-gray-400'
-                                        }`}>
-                                          (zbývá {remaining}/{event.presetItems.find(pi => pi.menuItemId === menuItem.id)?.quantity || 0})
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                  
-                                  {/* Middle: Calculated total (shown only when quantity > 0) */}
-                                  <div className="text-sm text-gray-600 min-w-[100px] text-right">
-                                    {quantity > 0 && (
-                                      <span className="font-medium">
-                                        {quantity}× = {total.toFixed(2)} Kč
-                                      </span>
-                                    )}
-                                  </div>
-                                  
-                                  {/* Right: Buttons (always fixed position) */}
-                                  <div className="flex items-center gap-2 flex-shrink-0">
-                                    <button
-                                      onClick={() => handleItemQuantityChange(menuItem.id, -1)}
-                                      className="btn btn-secondary w-10 h-10"
-                                      disabled={quantity === 0}
-                                    >
-                                      -
-                                    </button>
-                                    <span className="w-8 text-center font-semibold">{quantity}</span>
-                                    <button
-                                      onClick={() => handleItemQuantityChange(menuItem.id, 1)}
-                                      className="btn btn-primary w-10 h-10"
-                                      disabled={event.presetItems && remaining !== null && remaining <= 0}
-                                    >
-                                      +
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Shared Items */}
-                    {sharedItems.length > 0 && (
-                      <div className="mb-4">
-                        <h5 className="text-sm font-medium text-gray-700 mb-2">Sdílené položky:</h5>
-                        <div className="space-y-2">
-                          {sharedItems.map(menuItem => {
-                            const isChecked = editingSharedIds.includes(menuItem.id);
-                            const participantCount = consumptions.filter(c =>
-                              c.sharedItemIds.includes(menuItem.id)
-                            ).length + (isChecked ? 1 : 0) - (editingSharedIds.includes(menuItem.id) && consumptions.find(c => c.memberId === balance.memberId)?.sharedItemIds.includes(menuItem.id) ? 1 : 0);
-                            const sharePrice = participantCount > 0 ? menuItem.price / participantCount : menuItem.price;
-
-                            return (
-                              <label
-                                key={menuItem.id}
-                                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer ${
-                                  isChecked ? 'bg-purple-50 border-2 border-purple-300' : 'bg-gray-50 border-2 border-transparent'
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => handleToggleSharedItem(menuItem.id)}
-                                  className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500"
-                                />
-                                <div className="flex-1">
-                                  <div className="font-medium text-gray-900">{menuItem.name}</div>
-                                  <div className="text-sm text-gray-600">
-                                    {menuItem.price.toFixed(2)} Kč / {participantCount} = {sharePrice.toFixed(2)} Kč
-                                  </div>
-                                </div>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Total */}
-                    <div className="bg-primary-50 p-3 rounded-lg mb-4">
-                      <div className="flex justify-between text-lg font-semibold">
-                        <span>Celkem:</span>
-                        <span>{calculateItemsTotal(editingItems, menuItems).toFixed(2)} Kč</span>
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => handleSaveExpandedConsumption(balance.memberId)} 
-                        className="btn btn-primary flex-1"
-                      >
-                        Uložit
-                      </button>
-                      <button
-                        onClick={() => {
-                          setExpandedMemberId(null);
-                          setEditingItems([]);
-                          setEditingSharedIds([]);
-                        }}
-                        className="btn btn-secondary flex-1"
-                      >
-                        Zrušit
-                      </button>
-                    </div>
+                    <ConsumptionForm
+                      memberId={balance.memberId}
+                      presetItems={event.presetItems}
+                      consumptions={consumptions}
+                      menuItems={menuItems}
+                      editingItems={editingItems}
+                      editingSharedIds={editingSharedIds}
+                      favoriteItems={favoriteItems}
+                      regularItems={regularItems}
+                      sharedItems={sharedItems}
+                      onItemQuantityChange={handleItemQuantityChange}
+                      onToggleSharedItem={handleToggleSharedItem}
+                      onSave={() => handleSaveConsumption(balance.memberId)}
+                      onCancel={() => {
+                        setExpandedMemberId(null);
+                        setEditingItems([]);
+                        setEditingSharedIds([]);
+                      }}
+                      title={hasItems ? '✏️ Upravit konzumaci' : '➕ Přidat konzumaci'}
+                      overdraftWarnings={currentOverdrafts}
+                    />
                   </div>
                 )}
               </div>
@@ -902,238 +873,25 @@ export default function EventDetail() {
             </select>
           </div>
         ) : (
-          <>
-            {/* Regular Items */}
-            <div className="mb-4">
-              <h3 className="font-medium text-gray-700 mb-2">Položky</h3>
-              <div className="space-y-2">
-                {/* Favorite items */}
-                {favoriteItems.length > 0 && (
-                  <>
-                    <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mt-2 mb-1">
-                      ⭐ Oblíbené
-                    </div>
-                    {favoriteItems.map(menuItem => {
-                      const currentItem = editingItems.find(i => i.menuItemId === menuItem.id);
-                      const quantity = currentItem?.quantity || 0;
-                      const total = menuItem.price * quantity;
-                      
-                      // Inventory tracking (only for Variant A)
-                      let remaining = null;
-                      let inventoryStatus = null;
-                      let isOutOfStock = false;
-                      
-                      if (event.presetItems) {
-                        remaining = getRemainingQuantity(menuItem.id, event.presetItems, consumptions);
-                        const presetItem = event.presetItems.find(pi => pi.menuItemId === menuItem.id);
-                        const total = presetItem?.quantity || 0;
-                        inventoryStatus = getInventoryStatus(remaining, total);
-                        isOutOfStock = remaining === 0;
-                      }
-                      
-                      // Hide items that are out of stock
-                      if (isOutOfStock) return null;
-
-                      return (
-                        <div key={menuItem.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 bg-yellow-50 p-2 rounded border border-yellow-200">
-                          {/* Left: Item info */}
-                          <div>
-                            <div className="font-medium text-gray-900">{menuItem.name}</div>
-                            <div className="text-sm text-gray-600">
-                              {menuItem.price.toFixed(2)} Kč
-                              {event.presetItems && remaining !== null && (
-                                <span className={`ml-2 ${
-                                  inventoryStatus === 'high' ? 'text-green-600' :
-                                  inventoryStatus === 'medium' ? 'text-yellow-600' :
-                                  inventoryStatus === 'low' ? 'text-red-600' :
-                                  'text-gray-400'
-                                }`}>
-                                  (zbývá {remaining}/{event.presetItems.find(pi => pi.menuItemId === menuItem.id)?.quantity || 0})
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          
-                          {/* Middle: Calculated total (shown only when quantity > 0) */}
-                          <div className="text-sm text-gray-600 min-w-[100px] text-right">
-                            {quantity > 0 && (
-                              <span className="font-medium">
-                                {quantity}× = {total.toFixed(2)} Kč
-                              </span>
-                            )}
-                          </div>
-                          
-                          {/* Right: Buttons (always fixed position) */}
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <button
-                              onClick={() => handleItemQuantityChange(menuItem.id, -1)}
-                              className="btn btn-secondary w-10 h-10"
-                              disabled={quantity === 0}
-                            >
-                              -
-                            </button>
-                            <span className="w-8 text-center font-semibold">{quantity}</span>
-                            <button
-                              onClick={() => handleItemQuantityChange(menuItem.id, 1)}
-                              className="btn btn-primary w-10 h-10"
-                              disabled={event.presetItems && remaining !== null && remaining <= 0}
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
-                
-                {/* Regular items */}
-                {regularItems.length > 0 && (
-                  <>
-                    {favoriteItems.length > 0 && (
-                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide mt-4 mb-1">
-                        Ostatní
-                      </div>
-                    )}
-                    {regularItems.map(menuItem => {
-                      const currentItem = editingItems.find(i => i.menuItemId === menuItem.id);
-                      const quantity = currentItem?.quantity || 0;
-                      const total = menuItem.price * quantity;
-                      
-                      // Inventory tracking (only for Variant A)
-                      let remaining = null;
-                      let inventoryStatus = null;
-                      let isOutOfStock = false;
-                      
-                      if (event.presetItems) {
-                        remaining = getRemainingQuantity(menuItem.id, event.presetItems, consumptions);
-                        const presetItem = event.presetItems.find(pi => pi.menuItemId === menuItem.id);
-                        const total = presetItem?.quantity || 0;
-                        inventoryStatus = getInventoryStatus(remaining, total);
-                        isOutOfStock = remaining === 0;
-                      }
-                      
-                      // Hide items that are out of stock
-                      if (isOutOfStock) return null;
-
-                      return (
-                        <div key={menuItem.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 bg-gray-50 p-2 rounded">
-                          {/* Left: Item info */}
-                          <div>
-                            <div className="font-medium text-gray-900">{menuItem.name}</div>
-                            <div className="text-sm text-gray-600">
-                              {menuItem.price.toFixed(2)} Kč
-                              {event.presetItems && remaining !== null && (
-                                <span className={`ml-2 ${
-                                  inventoryStatus === 'high' ? 'text-green-600' :
-                                  inventoryStatus === 'medium' ? 'text-yellow-600' :
-                                  inventoryStatus === 'low' ? 'text-red-600' :
-                                  'text-gray-400'
-                                }`}>
-                                  (zbývá {remaining}/{event.presetItems.find(pi => pi.menuItemId === menuItem.id)?.quantity || 0})
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          
-                          {/* Middle: Calculated total (shown only when quantity > 0) */}
-                          <div className="text-sm text-gray-600 min-w-[100px] text-right">
-                            {quantity > 0 && (
-                              <span className="font-medium">
-                                {quantity}× = {total.toFixed(2)} Kč
-                              </span>
-                            )}
-                          </div>
-                          
-                          {/* Right: Buttons (always fixed position) */}
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <button
-                              onClick={() => handleItemQuantityChange(menuItem.id, -1)}
-                              className="btn btn-secondary w-10 h-10"
-                              disabled={quantity === 0}
-                            >
-                              -
-                            </button>
-                            <span className="w-8 text-center font-semibold">{quantity}</span>
-                            <button
-                              onClick={() => handleItemQuantityChange(menuItem.id, 1)}
-                              className="btn btn-primary w-10 h-10"
-                              disabled={event.presetItems && remaining !== null && remaining <= 0}
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Shared Items */}
-            {sharedItems.length > 0 && (
-              <div className="mb-4">
-                <h3 className="font-medium text-gray-700 mb-2">Sdílené položky</h3>
-                <div className="space-y-2">
-                  {sharedItems.map(menuItem => {
-                    const isChecked = editingSharedIds.includes(menuItem.id);
-                    const participantCount = consumptions.filter(c =>
-                      c.sharedItemIds.includes(menuItem.id)
-                    ).length + (isChecked ? 1 : 0) - (editingSharedIds.includes(menuItem.id) && consumptions.find(c => c.memberId === selectedMemberId)?.sharedItemIds.includes(menuItem.id) ? 1 : 0);
-                    const sharePrice = participantCount > 0 ? menuItem.price / participantCount : menuItem.price;
-
-                    return (
-                      <label
-                        key={menuItem.id}
-                        className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer ${
-                          isChecked ? 'bg-purple-50 border-2 border-purple-300' : 'bg-gray-50 border-2 border-transparent'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleToggleSharedItem(menuItem.id)}
-                          className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500"
-                        />
-                        <div className="flex-1">
-                          <div className="font-medium text-gray-900">{menuItem.name}</div>
-                          <div className="text-sm text-gray-600">
-                            {menuItem.price.toFixed(2)} Kč / {participantCount} = {sharePrice.toFixed(2)} Kč
-                          </div>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Total */}
-            <div className="bg-primary-50 p-3 rounded-lg mb-4">
-              <div className="flex justify-between text-lg font-semibold">
-                <span>Celkem:</span>
-                <span>{editingTotal.toFixed(2)} Kč</span>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-2">
-              <button onClick={handleSaveConsumption} className="btn btn-primary flex-1">
-                Uložit
-              </button>
-              <button
-                onClick={() => {
-                  setSelectedMemberId('');
-                  setEditingItems([]);
-                  setEditingSharedIds([]);
-                }}
-                className="btn btn-secondary flex-1"
-              >
-                Zrušit
-              </button>
-            </div>
-          </>
+          <ConsumptionForm
+            memberId={selectedMemberId}
+            presetItems={event.presetItems}
+            consumptions={consumptions}
+            menuItems={menuItems}
+            editingItems={editingItems}
+            editingSharedIds={editingSharedIds}
+            favoriteItems={favoriteItems}
+            regularItems={regularItems}
+            sharedItems={sharedItems}
+            onItemQuantityChange={handleItemQuantityChange}
+            onToggleSharedItem={handleToggleSharedItem}
+            onSave={() => handleSaveConsumption(selectedMemberId)}
+            onCancel={() => {
+              setSelectedMemberId('');
+              setEditingItems([]);
+              setEditingSharedIds([]);
+            }}
+          />
         )}
       </div>
 
@@ -1147,17 +905,96 @@ export default function EventDetail() {
             readOnly
             className="input flex-1"
           />
-          <button
+          <Button
             onClick={() => {
               navigator.clipboard.writeText(`${window.location.origin}/event/${eventId}`);
-              alert(TEXTS.notifications.linkCopied);
+              toast.success(TEXTS.notifications.linkCopied);
             }}
-            className="btn btn-secondary"
+            variant="outline"
           >
-            Kopírovat
-          </button>
+            📋 Kopírovat
+          </Button>
         </div>
       </div>
+
+      {/* Auto-close dialog (when all members paid) */}
+      <AlertDialog open={showAutoCloseDialog} onOpenChange={setShowAutoCloseDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Všichni členové zaplatili! 🎉</AlertDialogTitle>
+            <AlertDialogDescription>
+              Chcete uzavřít událost?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild>
+              <Button variant="outline">Zrušit</Button>
+            </AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button onClick={() => closeEvent()}>Uzavřít událost</Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Close with unpaid dialog (3 buttons) */}
+      <AlertDialog open={showCloseWithUnpaidDialog} onOpenChange={setShowCloseWithUnpaidDialog}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>⚠️ Někteří členové ještě nezaplatili</AlertDialogTitle>
+            <AlertDialogDescription>
+              Nezaplaceno: {unpaidMemberNames.join(', ')}
+              <br /><br />
+              Chcete uzavřít událost?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-2 mt-4">
+            <Button 
+              onClick={() => closeEvent(true)}
+              className="w-full"
+            >
+              Označit jako zaplaceno a uzavřít
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowCloseWithUnpaidDialog(false);
+                closeEvent(false);
+              }}
+              className="w-full"
+            >
+              Uzavřít bez platby
+            </Button>
+            <Button 
+              variant="outline"
+              onClick={() => setShowCloseWithUnpaidDialog(false)}
+              className="w-full"
+            >
+              Zrušit
+            </Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete event dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Smazat událost</AlertDialogTitle>
+            <AlertDialogDescription>
+              Opravdu chcete smazat tuto událost? Tato akce je nevratná.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild>
+              <Button variant="outline">Zrušit</Button>
+            </AlertDialogCancel>
+            <AlertDialogAction asChild>
+              <Button variant="destructive" onClick={handleDeleteEvent}>Smazat</Button>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
