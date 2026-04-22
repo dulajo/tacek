@@ -21,7 +21,7 @@ Návod na nasazení Tácek aplikace na Proxmox LXC kontejner s Nginx Proxy Manag
 2. Zkopíruj obsah `deployment/01-create-lxc.sh` do Proxmox shellu
 3. **UPRAV** konfiguraci v skriptu:
    ```bash
-   CT_ID=110              # ID kontejneru (změň pokud 110 už existuje)
+   CT_ID=114              # ID kontejneru (změň pokud 114 už existuje)
    CT_PASSWORD="..."      # Změň na silnější heslo!
    CT_STORAGE="local-lvm" # Tvůj storage pool
    ```
@@ -37,7 +37,7 @@ Návod na nasazení Tácek aplikace na Proxmox LXC kontejner s Nginx Proxy Manag
 
 1. Vstup do kontejneru:
    ```bash
-   pct enter 110
+   pct enter 114
    ```
 
 2. Zkopíruj obsah `deployment/02-install-nginx.sh` do kontejneru
@@ -59,27 +59,34 @@ Návod na nasazení Tácek aplikace na Proxmox LXC kontejner s Nginx Proxy Manag
 
 ### **Krok 3: Build a deploy aplikace**
 
-1. Na svém **Macu**, v projektu Tácek:
+Deploy se provádí přímo z **Proxmox node shellu** (ne z Macu).
+
+1. Otevři Proxmox web UI: **https://server.dulove.cz:8006**
+2. Jdi na hlavní node → **Shell**
+3. Spusť tyto příkazy:
    ```bash
-   cd /Users/josefdula/IdeaProjects/tacek
+   cd /tmp
+   git clone https://github.com/dulajo/tacek.git
+    cd tacek
+
+    # Create .env (Vite embeds env vars at build time, .env is gitignored)
+    cat > .env << 'EOF'
+    VITE_SUPABASE_URL=https://greqhsslyyanbumotlzo.supabase.co
+    VITE_SUPABASE_ANON_KEY=sb_publishable_0mwT_YxyH3n8Wsa0hEFHeg_wnYrkcqu
+    EOF
+
+    npm install
+   npm run build
+   cd dist && tar czf /tmp/tacek-dist.tar.gz .
+   pct push 114 /tmp/tacek-dist.tar.gz /tmp/tacek-dist.tar.gz
+   pct exec 114 -- bash -c "rm -rf /var/www/tacek/* && tar xzf /tmp/tacek-dist.tar.gz -C /var/www/tacek && rm /tmp/tacek-dist.tar.gz"
+   pct exec 114 -- curl -s http://localhost | head -5
+   rm -rf /tmp/tacek /tmp/tacek-dist.tar.gz
    ```
 
-2. **UPRAV** `deployment/03-deploy.sh`:
-   ```bash
-   LXC_IP="192.168.1.150"     # IP z kroku 1
-   PROXMOX_IP="192.168.1.XXX" # IP Proxmoxu
-   LXC_ID="110"               # ID kontejneru
-   ```
+   Nebo použij skript `deployment/03-deploy.sh` (zkopíruj na Proxmox node a spusť).
 
-3. Udělej skript executable a spusť:
-   ```bash
-   chmod +x deployment/03-deploy.sh
-   ./deployment/03-deploy.sh
-   ```
-
-4. Skript vytvoří `tacek-dist.tar.gz` a **vypíše manuální kroky**
-
-5. Následuj vypísané kroky pro zkopírování do Proxmoxu
+**Prerekvizity na Proxmox node:** nodejs, npm, git (již nainstalováno).
 
 ---
 
@@ -143,20 +150,10 @@ Návod na nasazení Tácek aplikace na Proxmox LXC kontejner s Nginx Proxy Manag
 
 ## 🔄 Opakované deploymenty (update aplikace)
 
-Když uděláš změny v kódu:
-
-```bash
-cd /Users/josefdula/IdeaProjects/tacek
-
-# Commitni změny
-git add .
-git commit -m "fix: nějaká oprava"
-git push
-
-# Deploy
-./deployment/03-deploy.sh
-# Následuj vypísané kroky
-```
+1. Commitni a pushni změny na GitHub
+2. Otevři Proxmox web UI: **https://server.dulove.cz:8006** → node → Shell
+3. Spusť příkazy z Kroku 3 výše (nebo `03-deploy.sh`)
+4. Ověř na https://tacek.dulove.cz (hard refresh: Cmd+Shift+R)
 
 ---
 
@@ -165,14 +162,14 @@ git push
 ### Aplikace nejde otevřít
 ```bash
 # V LXC kontejneru zkontroluj Nginx
-pct enter 110
+pct enter 114
 systemctl status nginx
 nginx -t
 ```
 
 ### 502 Bad Gateway v NPM
-- Zkontroluj že LXC kontejner běží: `pct status 110`
-- Zkontroluj IP adresu: `pct exec 110 -- hostname -I`
+- Zkontroluj že LXC kontejner běží: `pct status 114`
+- Zkontroluj IP adresu: `pct exec 114 -- hostname -I`
 - Zkontroluj že Nginx běží v kontejneru
 
 ### SSL certifikát nejde vytvořit
@@ -185,7 +182,7 @@ nginx -t
 
 ```
 Proxmox
-├── LXC 110 (tacek)
+├── LXC 114 (tacek)
 │   ├── Nginx :80
 │   └── /var/www/tacek (aplikace)
 │

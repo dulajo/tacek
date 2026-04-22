@@ -1,75 +1,54 @@
 #!/bin/bash
 #
-# Tácek Deployment Script
-# Spusť tento skript na svém Macu pro deployment do LXC kontejneru
+# Tacek Deployment Script
+# Run this script on the Proxmox node shell (not on Mac)
+# Proxmox web UI: https://server.dulove.cz:8006 → node → Shell
 #
 
 set -e
 
-# Konfigurace - UPRAV PODLE SVÉHO PROSTŘEDÍ
-LXC_IP="10.140.0.184"  # IP adresa LXC kontejneru (zjistíš z 01-create-lxc.sh)
-LXC_USER="root"
-LXC_PASSWORD="tacek123"  # Heslo z 01-create-lxc.sh
-PROXMOX_IP="10.140.0.XXX"  # IP Proxmoxu - UPRAV!
-LXC_ID="110"  # ID kontejneru
+LXC_ID="114"
+REPO="https://github.com/dulajo/tacek.git"
+WORK_DIR="/tmp/tacek"
+ARCHIVE="/tmp/tacek-dist.tar.gz"
+WEB_ROOT="/var/www/tacek"
 
-echo "🍺 Tácek Deployment Script"
+echo "🍺 Tacek Deployment Script"
 echo "=========================="
-echo ""
 
-# Kontrola že jsme v správném adresáři
-if [ ! -f "package.json" ]; then
-    echo "❌ Chyba: Musíš spustit skript z root adresáře projektu!"
-    exit 1
-fi
+# Clone and build
+echo "📦 Cloning and building..."
+rm -rf "$WORK_DIR" "$ARCHIVE"
+cd /tmp
+git clone "$REPO"
+cd tacek
 
-# Build aplikace
-echo "📦 Builduji aplikaci..."
+# Vite embeds env vars at build time, so .env must exist before build.
+# The .env file is gitignored — we create it here.
+cat > .env << 'EOF'
+VITE_SUPABASE_URL=https://greqhsslyyanbumotlzo.supabase.co
+VITE_SUPABASE_ANON_KEY=sb_publishable_0mwT_YxyH3n8Wsa0hEFHeg_wnYrkcqu
+EOF
+
+npm install
 npm run build
 
-if [ ! -d "dist" ]; then
-    echo "❌ Chyba: Build selhal, adresář dist neexistuje!"
-    exit 1
-fi
-
-echo "✅ Build dokončen!"
-echo ""
-
-# Vytvoření deployment package
-echo "📦 Vytvářím deployment package..."
+# Package
+echo "📦 Creating deployment package..."
 cd dist
-tar -czf ../tacek-dist.tar.gz .
-cd ..
+tar czf "$ARCHIVE" .
 
-echo "✅ Package vytvořen: tacek-dist.tar.gz"
-echo ""
+# Deploy to LXC
+echo "🚀 Deploying to LXC $LXC_ID..."
+pct push "$LXC_ID" "$ARCHIVE" "$ARCHIVE"
+pct exec "$LXC_ID" -- bash -c "rm -rf ${WEB_ROOT}/* && tar xzf ${ARCHIVE} -C ${WEB_ROOT} && rm ${ARCHIVE}"
 
-# Informace pro manuální deployment
-echo "📋 MANUÁLNÍ DEPLOYMENT:"
-echo "======================"
+# Verify
+echo "🔍 Verifying..."
+pct exec "$LXC_ID" -- curl -s http://localhost | head -5
+
+# Cleanup
+rm -rf "$WORK_DIR" "$ARCHIVE"
+
 echo ""
-echo "1️⃣  Zkopíruj soubor na Proxmox:"
-echo "   scp tacek-dist.tar.gz root@${PROXMOX_IP}:/tmp/"
-echo ""
-echo "2️⃣  Přihlas se na Proxmox:"
-echo "   ssh root@${PROXMOX_IP}"
-echo ""
-echo "3️⃣  Zkopíruj do LXC kontejneru:"
-echo "   pct push ${LXC_ID} /tmp/tacek-dist.tar.gz /tmp/tacek-dist.tar.gz"
-echo ""
-echo "4️⃣  Vstup do kontejneru:"
-echo "   pct enter ${LXC_ID}"
-echo ""
-echo "5️⃣  Rozbal aplikaci:"
-echo "   cd /var/www/tacek"
-echo "   rm -rf *"
-echo "   tar -xzf /tmp/tacek-dist.tar.gz"
-echo "   rm /tmp/tacek-dist.tar.gz"
-echo ""
-echo "6️⃣  Test:"
-echo "   curl http://localhost"
-echo ""
-echo "✅ Hotovo! Aplikace by měla běžet na http://${LXC_IP}"
-echo ""
-echo "➡️  Další krok: Nastav reverse proxy v Nginx Proxy Manager"
-echo "   tacek.dulove.cz -> ${LXC_IP}:80"
+echo "✅ Done! Verify at https://tacek.dulove.cz (Cmd+Shift+R to hard refresh)"
