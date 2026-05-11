@@ -31,5 +31,10 @@ dist-ssr
 # MacOS
 .DS_Store
 
+# Server
+server/node_modules
+server/dist
+
 # Deployment
 deploy.sh
+docker-compose.override.yml

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { toast } from 'sonner';
 import { IDataRepository } from '../repositories/IDataRepository';
-import { SupabaseRepository } from '../repositories/SupabaseRepository';
+import { ApiRepository } from '../repositories/ApiRepository';
 import { Member, MenuItem, Event, MemberConsumption } from '../types/models';
 import { LoadingBar } from '../components/LoadingBar';
 
@@ -31,7 +31,7 @@ interface AppProviderProps {
 }
 
 export function AppProvider({ children }: AppProviderProps) {
-  const [repository] = useState<IDataRepository>(() => new SupabaseRepository());
+  const [repository] = useState<IDataRepository>(() => new ApiRepository());
   const [members, setMembers] = useState<Member[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [events, setEvents] = useState<Event[]>([]);

@@ -7,9 +7,6 @@ import ManageMembers from './pages/ManageMembers';
 import ManageMenu from './pages/ManageMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
-// Import migration utility (exposes window.migrateToSupabase)
-import './utils/migrateToSupabase';
-
 function App() {
   return (
     <ErrorBoundary>

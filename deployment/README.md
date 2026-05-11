@@ -1,6 +1,6 @@
 # 🍺 Tácek - Deployment Guide
 
-Návod na nasazení Tácek aplikace na Proxmox LXC kontejner s Nginx Proxy Manager.
+Návod na nasazení Tácek aplikace na Proxmox LXC kontejner s Docker Compose a Nginx Proxy Manager.
 
 ---
 
@@ -9,7 +9,7 @@ Návod na nasazení Tácek aplikace na Proxmox LXC kontejner s Nginx Proxy Manag
 - ✅ Proxmox VE server
 - ✅ Nginx Proxy Manager (NPM) běžící v LXC/Docker
 - ✅ Veřejná IP + doména dulove.cz
-- ✅ AdGuard Home / DNS server
+- ✅ Docker & Docker Compose (instaluje se automaticky v kroku 1)
 
 ---
 
@@ -21,7 +21,7 @@ Návod na nasazení Tácek aplikace na Proxmox LXC kontejner s Nginx Proxy Manag
 2. Zkopíruj obsah `deployment/01-create-lxc.sh` do Proxmox shellu
 3. **UPRAV** konfiguraci v skriptu:
    ```bash
-   CT_ID=114              # ID kontejneru (změň pokud 114 už existuje)
+   CT_ID=110              # ID kontejneru (změň pokud 110 už existuje)
    CT_PASSWORD="..."      # Změň na silnější heslo!
    CT_STORAGE="local-lvm" # Tvůj storage pool
    ```
@@ -31,62 +31,44 @@ Návod na nasazení Tácek aplikace na Proxmox LXC kontejner s Nginx Proxy Manag
    ```
 5. **Zapiš si IP adresu** kontejneru (např. `192.168.1.150`)
 
----
-
-### **Krok 2: Instaluj Nginx v LXC kontejneru**
-
-1. Vstup do kontejneru:
-   ```bash
-   pct enter 114
-   ```
-
-2. Zkopíruj obsah `deployment/02-install-nginx.sh` do kontejneru
-   ```bash
-   nano /tmp/install-nginx.sh
-   # Vlož obsah skriptu, uložit Ctrl+O, Enter, Ctrl+X
-   chmod +x /tmp/install-nginx.sh
-   bash /tmp/install-nginx.sh
-   ```
-
-3. Po dokončení otevři v prohlížeči `http://IP_KONTEJNERU` (měl by se zobrazit placeholder)
-
-4. Vystup z kontejneru:
-   ```bash
-   exit
-   ```
+Skript automaticky nainstaluje Docker a Docker Compose uvnitř kontejneru.
 
 ---
 
-### **Krok 3: Build a deploy aplikace**
+### **Krok 2: (Volitelné) Ruční instalace Dockeru**
 
-Deploy se provádí přímo z **Proxmox node shellu** (ne z Macu).
+Pokud jsi nepoužil `01-create-lxc.sh` nebo potřebuješ Docker nainstalovat znovu, viz `deployment/02-install-docker.sh` (referenční skript).
+
+Docker se instaluje automaticky v kroku 1, takže tento krok je obvykle zbytečný.
+
+---
+
+### **Krok 3: Deploy s Docker Compose**
+
+Deploy se provádí z **Proxmox node shellu**.
 
 1. Otevři Proxmox web UI: **https://server.dulove.cz:8006**
 2. Jdi na hlavní node → **Shell**
-3. Spusť tyto příkazy:
+3. Spusť deploy skript `deployment/03-deploy.sh`, nebo ručně:
+
    ```bash
-   cd /tmp
-   git clone https://github.com/dulajo/tacek.git
-    cd tacek
+   # Clone repo do LXC
+   pct exec 110 -- bash -c "cd /opt && git clone https://github.com/dulajo/tacek.git"
 
-    # Create .env (Vite embeds env vars at build time, .env is gitignored)
-    cat > .env << 'EOF'
-    VITE_SUPABASE_URL=https://greqhsslyyanbumotlzo.supabase.co
-    VITE_SUPABASE_ANON_KEY=sb_publishable_0mwT_YxyH3n8Wsa0hEFHeg_wnYrkcqu
-    EOF
+   # Vytvoř .env uvnitř LXC
+   pct exec 110 -- bash -c "cat > /opt/tacek/.env << 'EOF'
+   DATABASE_URL=postgresql://tacek:CHANGE_ME@postgres:5432/tacek
+   POSTGRES_PASSWORD=CHANGE_ME
+   EOF"
 
-    npm install
-   npm run build
-   cd dist && tar czf /tmp/tacek-dist.tar.gz .
-   pct push 114 /tmp/tacek-dist.tar.gz /tmp/tacek-dist.tar.gz
-   pct exec 114 -- bash -c "rm -rf /var/www/tacek/* && tar xzf /tmp/tacek-dist.tar.gz -C /var/www/tacek && rm /tmp/tacek-dist.tar.gz"
-   pct exec 114 -- curl -s http://localhost | head -5
-   rm -rf /tmp/tacek /tmp/tacek-dist.tar.gz
+   # Spusť Docker Compose
+   pct exec 110 -- bash -c "cd /opt/tacek && docker compose up -d --build"
    ```
 
-   Nebo použij skript `deployment/03-deploy.sh` (zkopíruj na Proxmox node a spusť).
-
-**Prerekvizity na Proxmox node:** nodejs, npm, git (již nainstalováno).
+4. Ověř že kontejnery běží:
+   ```bash
+   pct exec 110 -- docker compose -f /opt/tacek/docker-compose.yml ps
+   ```
 
 ---
 
@@ -111,7 +93,7 @@ Deploy se provádí přímo z **Proxmox node shellu** (ne z Macu).
    - **Domain Names**: `tacek.dulove.cz`
    - **Scheme**: `http`
    - **Forward Hostname / IP**: `192.168.1.150` (IP LXC kontejneru)
-   - **Forward Port**: `80`
+   - **Forward Port**: `80` (nginx kontejner z Docker Compose)
    - ✅ **Cache Assets**
    - ✅ **Block Common Exploits**
    - ✅ **Websockets Support**
@@ -120,27 +102,13 @@ Deploy se provádí přímo z **Proxmox node shellu** (ne z Macu).
    - ✅ **Force SSL**
    - ✅ **HTTP/2 Support**
    - **SSL Certificate**: Request a new SSL Certificate (Let's Encrypt)
-   - ✅ **Force SSL**
    - ✅ **I Agree to the Let's Encrypt Terms of Service**
 
 5. **Save**
 
 ---
 
-### **Krok 6: Nastav Supabase CORS**
-
-1. Přihlas se na https://supabase.com
-2. Vyber projekt `greqhsslyyanbumotlzo`
-3. **Settings** → **API** → **URL Configuration**
-4. Přidej do **Allowed origins**:
-   ```
-   https://tacek.dulove.cz
-   ```
-5. Save
-
----
-
-### **Krok 7: Test! 🎉**
+### **Krok 6: Test! 🎉**
 
 1. Otevři `https://tacek.dulove.cz`
 2. Měla by se zobrazit Tácek aplikace
@@ -152,7 +120,11 @@ Deploy se provádí přímo z **Proxmox node shellu** (ne z Macu).
 
 1. Commitni a pushni změny na GitHub
 2. Otevři Proxmox web UI: **https://server.dulove.cz:8006** → node → Shell
-3. Spusť příkazy z Kroku 3 výše (nebo `03-deploy.sh`)
+3. Spusť:
+   ```bash
+   pct exec 110 -- bash -c "cd /opt/tacek && git pull && docker compose up -d --build"
+   ```
+   Nebo použij skript `deployment/03-deploy.sh`.
 4. Ověř na https://tacek.dulove.cz (hard refresh: Cmd+Shift+R)
 
 ---
@@ -161,16 +133,21 @@ Deploy se provádí přímo z **Proxmox node shellu** (ne z Macu).
 
 ### Aplikace nejde otevřít
 ```bash
-# V LXC kontejneru zkontroluj Nginx
-pct enter 114
-systemctl status nginx
-nginx -t
+# Zkontroluj Docker kontejnery v LXC
+pct exec 110 -- docker compose -f /opt/tacek/docker-compose.yml ps
+pct exec 110 -- docker compose -f /opt/tacek/docker-compose.yml logs
 ```
 
 ### 502 Bad Gateway v NPM
-- Zkontroluj že LXC kontejner běží: `pct status 114`
-- Zkontroluj IP adresu: `pct exec 114 -- hostname -I`
-- Zkontroluj že Nginx běží v kontejneru
+- Zkontroluj že LXC kontejner běží: `pct status 110`
+- Zkontroluj IP adresu: `pct exec 110 -- hostname -I`
+- Zkontroluj že Docker kontejnery běží: `pct exec 110 -- docker ps`
+
+### Databáze nefunguje
+```bash
+# Zkontroluj postgres kontejner
+pct exec 110 -- docker compose -f /opt/tacek/docker-compose.yml logs postgres
+```
 
 ### SSL certifikát nejde vytvořit
 - Zkontroluj že port 80 a 443 jsou forward z routeru na NPM
@@ -178,13 +155,15 @@ nginx -t
 
 ---
 
-## 📁 Struktura
+## 📁 Architektura
 
 ```
 Proxmox
-├── LXC 114 (tacek)
-│   ├── Nginx :80
-│   └── /var/www/tacek (aplikace)
+├── LXC 110 (tacek)
+│   └── Docker Compose
+│       ├── postgres   (PostgreSQL databáze)
+│       ├── api        (Backend API)
+│       └── nginx :80  (Reverse proxy + SPA)
 │
 ├── LXC/Docker (npm)
 │   └── Nginx Proxy Manager :80, :443
@@ -201,10 +180,8 @@ Proxmox
 - ✅ HTTPS (Let's Encrypt)
 - ✅ LXC kontejner (izolace)
 - ✅ Unprivileged LXC
-- ✅ Nginx security headers
+- ✅ Docker kontejnery (další izolace)
+- ✅ PostgreSQL v privátní Docker síti
 - ✅ Private GitHub repo
 - ⚠️ **ZMĚŇ** výchozí heslo v `01-create-lxc.sh`!
-
----
-
-Máš-li problémy, napiš! 🍺
+- ⚠️ **ZMĚŇ** `POSTGRES_PASSWORD` v `.env`!

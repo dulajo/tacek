@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Member {
+  id              String    @id @default(uuid()) @db.Uuid
+  name            String
+  isCore          Boolean   @default(false) @map("is_core")
+  revolutUsername  String?   @map("revolut_username")
+  bankAccount     String?   @map("bank_account")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  events          Event[]   @relation("EventPayer")
+  eventMembers    EventMember[]
+  consumptions    MemberConsumption[]
+
+  @@map("members")
+}
+
+model MenuItem {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  price       Decimal   @db.Decimal(10, 2)
+  category    String
+  isShared    Boolean   @default(false) @map("is_shared")
+  isFavorite  Boolean   @default(false) @map("is_favorite")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  eventPresetItems      EventPresetItem[]
+  consumptionItems      ConsumptionItem[]
+  consumptionSharedItems ConsumptionSharedItem[]
+
+  @@map("menu_items")
+}
+
+model Event {
+  id          String    @id @default(uuid()) @db.Uuid
+  date        DateTime  @db.Timestamptz
+  name        String?
+  payerId     String?   @map("payer_id") @db.Uuid
+  totalAmount Decimal   @db.Decimal(10, 2)
+  tip         Decimal   @default(0) @db.Decimal(10, 2)
+  status      String    @default("open")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  payer       Member?   @relation("EventPayer", fields: [payerId], references: [id], onDelete: SetNull)
+  eventMembers    EventMember[]
+  presetItems     EventPresetItem[]
+  consumptions    MemberConsumption[]
+
+  @@map("events")
+}
+
+model EventMember {
+  eventId   String  @map("event_id") @db.Uuid
+  memberId  String  @map("member_id") @db.Uuid
+  paidSelf  Boolean @default(false) @map("paid_self")
+
+  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  member    Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, memberId])
+  @@map("event_members")
+}
+
+model EventPresetItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  eventId     String  @map("event_id") @db.Uuid
+  menuItemId  String  @map("menu_item_id") @db.Uuid
+  quantity    Int
+
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  menuItem    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@map("event_preset_items")
+}
+
+model MemberConsumption {
+  id          String  @id @default(uuid()) @db.Uuid
+  eventId     String  @map("event_id") @db.Uuid
+  memberId    String  @map("member_id") @db.Uuid
+  hasPaid     Boolean @default(false) @map("has_paid")
+  totalAmount Decimal @default(0) @map("total_amount") @db.Decimal(10, 2)
+
+  event       Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  member      Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  items       ConsumptionItem[]
+  sharedItems ConsumptionSharedItem[]
+
+  @@unique([eventId, memberId])
+  @@map("member_consumptions")
+}
+
+model ConsumptionItem {
+  id              String  @id @default(uuid()) @db.Uuid
+  consumptionId   String  @map("consumption_id") @db.Uuid
+  menuItemId      String  @map("menu_item_id") @db.Uuid
+  quantity        Int
+
+  consumption     MemberConsumption @relation(fields: [consumptionId], references: [id], onDelete: Cascade)
+  menuItem        MenuItem          @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@map("consumption_items")
+}
+
+model ConsumptionSharedItem {
+  consumptionId   String  @map("consumption_id") @db.Uuid
+  menuItemId      String  @map("menu_item_id") @db.Uuid
+
+  consumption     MemberConsumption @relation(fields: [consumptionId], references: [id], onDelete: Cascade)
+  menuItem        MenuItem          @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@id([consumptionId, menuItemId])
+  @@map("consumption_shared_items")
+}

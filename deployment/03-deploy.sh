@@ -1,54 +1,51 @@
 #!/bin/bash
 #
-# Tacek Deployment Script
-# Run this script on the Proxmox node shell (not on Mac)
+# Tacek Deployment Script (Docker Compose)
+# Run this script on the Proxmox node shell (not inside the LXC)
 # Proxmox web UI: https://server.dulove.cz:8006 → node → Shell
 #
 
 set -e
 
-LXC_ID="114"
+LXC_ID="110"
 REPO="https://github.com/dulajo/tacek.git"
-WORK_DIR="/tmp/tacek"
-ARCHIVE="/tmp/tacek-dist.tar.gz"
-WEB_ROOT="/var/www/tacek"
+APP_DIR="/opt/tacek"
 
-echo "🍺 Tacek Deployment Script"
-echo "=========================="
+echo "🍺 Tacek Deployment Script (Docker Compose)"
+echo "============================================="
 
-# Clone and build
-echo "📦 Cloning and building..."
-rm -rf "$WORK_DIR" "$ARCHIVE"
-cd /tmp
-git clone "$REPO"
-cd tacek
+# Check if already deployed (update) or fresh deploy
+if pct exec "$LXC_ID" -- test -d "$APP_DIR/.git" 2>/dev/null; then
+    echo "📦 Existing installation found. Updating..."
+    pct exec "$LXC_ID" -- bash -c "cd ${APP_DIR} && git pull"
+    echo "🚀 Rebuilding and restarting containers..."
+    pct exec "$LXC_ID" -- bash -c "cd ${APP_DIR} && docker compose up -d --build"
+else
+    echo "📦 Fresh deployment. Cloning repository..."
+    pct exec "$LXC_ID" -- bash -c "mkdir -p $(dirname ${APP_DIR}) && git clone ${REPO} ${APP_DIR}"
 
-# Vite embeds env vars at build time, so .env must exist before build.
-# The .env file is gitignored — we create it here.
-cat > .env << 'EOF'
-VITE_SUPABASE_URL=https://greqhsslyyanbumotlzo.supabase.co
-VITE_SUPABASE_ANON_KEY=sb_publishable_0mwT_YxyH3n8Wsa0hEFHeg_wnYrkcqu
-EOF
+    echo "⚙️  Creating .env file..."
+    pct exec "$LXC_ID" -- bash -c "cat > ${APP_DIR}/.env << 'EOF'
+DATABASE_URL=postgresql://tacek:CHANGE_ME@postgres:5432/tacek
+POSTGRES_DB=tacek
+POSTGRES_USER=tacek
+POSTGRES_PASSWORD=CHANGE_ME
+VITE_API_URL=/api
+EOF"
 
-npm install
-npm run build
+    echo "⚠️  IMPORTANT: Edit ${APP_DIR}/.env inside LXC ${LXC_ID} and change POSTGRES_PASSWORD!"
+    echo "   pct exec ${LXC_ID} -- nano ${APP_DIR}/.env"
+    echo ""
+    read -p "Press Enter after editing .env, or Ctrl+C to abort..."
 
-# Package
-echo "📦 Creating deployment package..."
-cd dist
-tar czf "$ARCHIVE" .
-
-# Deploy to LXC
-echo "🚀 Deploying to LXC $LXC_ID..."
-pct push "$LXC_ID" "$ARCHIVE" "$ARCHIVE"
-pct exec "$LXC_ID" -- bash -c "rm -rf ${WEB_ROOT}/* && tar xzf ${ARCHIVE} -C ${WEB_ROOT} && rm ${ARCHIVE}"
+    echo "🚀 Starting Docker Compose..."
+    pct exec "$LXC_ID" -- bash -c "cd ${APP_DIR} && docker compose up -d --build"
+fi
 
 # Verify
-echo "🔍 Verifying..."
-pct exec "$LXC_ID" -- curl -s http://localhost | head -5
-
-# Cleanup
-rm -rf "$WORK_DIR" "$ARCHIVE"
+echo ""
+echo "🔍 Verifying containers..."
+pct exec "$LXC_ID" -- docker compose -f "${APP_DIR}/docker-compose.yml" ps
 
 echo ""
 echo "✅ Done! Verify at https://tacek.dulove.cz (Cmd+Shift+R to hard refresh)"
