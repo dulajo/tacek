@@ -12,6 +12,7 @@ function mapEvent(row: any) {
     payerId: row.payerId,
     totalAmount: Number(row.totalAmount),
     tip: Number(row.tip),
+    voucherAmount: Number(row.voucherAmount) || 0,
     presentMemberIds: row.eventMembers?.map((em: { memberId: string }) => em.memberId) || [],
     selfPaidMemberIds: row.eventMembers
       ?.filter((em: { paidSelf: boolean }) => em.paidSelf)
@@ -52,10 +53,10 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id, date, name, payerId, totalAmount, tip, presentMemberIds, selfPaidMemberIds, presetItems, status } = req.body;
+    const { id, date, name, payerId, totalAmount, tip, voucherAmount, presentMemberIds, selfPaidMemberIds, presetItems, status } = req.body;
     const event = await prisma.$transaction(async (tx) => {
       const created = await tx.event.create({
-        data: { id, date: new Date(date), name, payerId, totalAmount, tip, status },
+        data: { id, date: new Date(date), name, payerId, totalAmount, tip, voucherAmount: voucherAmount || 0, status },
       });
       if (presentMemberIds?.length) {
         await tx.eventMember.createMany({
@@ -84,11 +85,11 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const eventId = req.params.id as string;
-    const { date, name, payerId, totalAmount, tip, presentMemberIds, selfPaidMemberIds, presetItems, status } = req.body;
+    const { date, name, payerId, totalAmount, tip, voucherAmount, presentMemberIds, selfPaidMemberIds, presetItems, status } = req.body;
     const event = await prisma.$transaction(async (tx) => {
       await tx.event.update({
         where: { id: eventId },
-        data: { date: new Date(date), name, payerId, totalAmount, tip, status },
+        data: { date: new Date(date), name, payerId, totalAmount, tip, voucherAmount: voucherAmount || 0, status },
       });
       await tx.eventMember.deleteMany({ where: { eventId } });
       if (presentMemberIds?.length) {

@@ -30,6 +30,7 @@ CREATE TABLE events (
   payer_id UUID REFERENCES members(id) ON DELETE SET NULL,
   total_amount DECIMAL(10, 2) NOT NULL,
   tip DECIMAL(10, 2) DEFAULT 0,
+  voucher_amount DECIMAL(10, 2) DEFAULT 0,
   status TEXT DEFAULT 'open' CHECK (status IN ('open', 'closed')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

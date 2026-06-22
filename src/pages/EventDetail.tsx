@@ -314,12 +314,17 @@ export default function EventDetail() {
     // Hlavička
     let message = `🍺 ${eventName}\n\n`;
     message += `💳 Zaplatil: ${payerMember?.name} (${event.totalAmount.toFixed(2)} Kč)\n`;
-    
+
     // Číslo účtu (jednou nahoře)
     if (payerAccount) {
       message += `🏦 Účet: ${payerAccount}\n`;
     }
-    
+
+    if (event.voucherAmount && event.voucherAmount > 0) {
+      const discountPerMember = event.voucherAmount / event.presentMemberIds.length;
+      message += `🎟️ Voucher: ${event.voucherAmount.toFixed(2)} Kč (každý −${discountPerMember.toFixed(2)} Kč)\n`;
+    }
+
     message += `\n━━━━━━━━━━━━━━━━━━━━\n\n`;
     
     // Pro každého člena
@@ -587,6 +592,11 @@ export default function EventDetail() {
           <div className="text-sm text-gray-700 mt-1">
             💵 Dýško: {event.tip.toFixed(2)} Kč
           </div>
+          {event.voucherAmount != null && event.voucherAmount > 0 && (
+            <div className="text-sm text-green-700 mt-1">
+              🎟️ Voucher: {event.voucherAmount.toFixed(2)} Kč
+            </div>
+          )}
           
           {/* Copy Summary Button */}
           <Button
@@ -769,6 +779,13 @@ export default function EventDetail() {
                             {balance.tipShare > 0 && (
                               <div className="mt-2 pt-2 border-t border-gray-200 text-blue-600">
                                 • Dýško (podíl) = {balance.tipShare.toFixed(2)} Kč
+                              </div>
+                            )}
+
+                            {/* Voucher discount */}
+                            {balance.voucherDiscount > 0 && (
+                              <div className="mt-2 pt-2 border-t border-gray-200 text-green-700">
+                                • Sleva z voucheru = −{balance.voucherDiscount.toFixed(2)} Kč
                               </div>
                             )}
 

@@ -7,6 +7,7 @@ export interface EventFormData {
   payerId: string;
   totalAmount: string;
   tip: string;
+  voucherAmount: string;
 }
 
 interface UseEventFormParams {

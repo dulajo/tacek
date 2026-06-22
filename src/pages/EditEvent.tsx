@@ -31,6 +31,7 @@ export default function EditEvent() {
       payerId: '',
       totalAmount: '',
       tip: '',
+      voucherAmount: '',
     },
     menuItems,
   });
@@ -57,6 +58,7 @@ export default function EditEvent() {
           payerId: eventData.payerId,
           totalAmount: eventData.totalAmount.toString(),
           tip: eventData.tip.toString(),
+          voucherAmount: eventData.voucherAmount ? eventData.voucherAmount.toString() : '',
         });
         form.setSelectedMemberIds(eventData.presentMemberIds);
         form.setSelfPaidMemberIds(eventData.selfPaidMemberIds || []);
@@ -97,6 +99,7 @@ export default function EditEvent() {
       payerId: form.eventData.payerId,
       totalAmount: parseFloat(form.eventData.totalAmount) || 0,
       tip: parseFloat(form.eventData.tip) || 0,
+      voucherAmount: parseFloat(form.eventData.voucherAmount) || 0,
       presentMemberIds: form.selectedMemberIds,
       selfPaidMemberIds: form.selfPaidMemberIds.length > 0 ? form.selfPaidMemberIds : undefined,
       presetItems: form.hasReceipt && form.presetItems.length > 0 ? form.presetItems : undefined,
@@ -238,8 +241,10 @@ export default function EditEvent() {
           onPayerChange={(payerId) => form.setEventData({ ...form.eventData, payerId })}
           totalAmount={form.eventData.totalAmount}
           tip={form.eventData.tip}
+          voucherAmount={form.eventData.voucherAmount}
           onTotalAmountChange={(totalAmount) => form.setEventData({ ...form.eventData, totalAmount })}
           onTipChange={(tip) => form.setEventData({ ...form.eventData, tip })}
+          onVoucherAmountChange={(voucherAmount) => form.setEventData({ ...form.eventData, voucherAmount })}
         />
 
         <PresetItemsEditor

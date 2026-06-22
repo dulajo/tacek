@@ -44,8 +44,9 @@ model Event {
   name        String?
   payerId     String?   @map("payer_id") @db.Uuid
   totalAmount Decimal   @db.Decimal(10, 2)
-  tip         Decimal   @default(0) @db.Decimal(10, 2)
-  status      String    @default("open")
+  tip           Decimal   @default(0) @db.Decimal(10, 2)
+  voucherAmount Decimal   @default(0) @map("voucher_amount") @db.Decimal(10, 2)
+  status        String    @default("open")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   payer       Member?   @relation("EventPayer", fields: [payerId], references: [id], onDelete: SetNull)

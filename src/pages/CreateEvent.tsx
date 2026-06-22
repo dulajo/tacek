@@ -44,6 +44,7 @@ export default function CreateEvent() {
       payerId: '',
       totalAmount: '',
       tip: '',
+      voucherAmount: '',
     },
     menuItems,
   });
@@ -69,6 +70,7 @@ export default function CreateEvent() {
         payerId: form.eventData.payerId,
         totalAmount: form.eventData.totalAmount,
         tip: form.eventData.tip,
+        voucherAmount: form.eventData.voucherAmount,
         selectedMemberIds: form.selectedMemberIds,
         selfPaidMemberIds: form.selfPaidMemberIds,
         hasReceipt: form.hasReceipt,
@@ -89,6 +91,7 @@ export default function CreateEvent() {
       payerId: draft.payerId,
       totalAmount: draft.totalAmount,
       tip: draft.tip,
+      voucherAmount: draft.voucherAmount || '',
     });
     form.setSelectedMemberIds(draft.selectedMemberIds);
     form.setSelfPaidMemberIds(draft.selfPaidMemberIds || []);
@@ -122,6 +125,7 @@ export default function CreateEvent() {
       payerId: form.eventData.payerId,
       totalAmount: parseFloat(form.eventData.totalAmount) || 0,
       tip: parseFloat(form.eventData.tip) || 0,
+      voucherAmount: parseFloat(form.eventData.voucherAmount) || 0,
       presentMemberIds: form.selectedMemberIds,
       selfPaidMemberIds: form.selfPaidMemberIds.length > 0 ? form.selfPaidMemberIds : undefined,
       presetItems: form.hasReceipt && form.presetItems.length > 0 ? form.presetItems : undefined,
@@ -246,8 +250,10 @@ export default function CreateEvent() {
           onPayerChange={(payerId) => form.setEventData({ ...form.eventData, payerId })}
           totalAmount={form.eventData.totalAmount}
           tip={form.eventData.tip}
+          voucherAmount={form.eventData.voucherAmount}
           onTotalAmountChange={(totalAmount) => form.setEventData({ ...form.eventData, totalAmount })}
           onTipChange={(tip) => form.setEventData({ ...form.eventData, tip })}
+          onVoucherAmountChange={(voucherAmount) => form.setEventData({ ...form.eventData, voucherAmount })}
         />
 
         <PresetItemsEditor

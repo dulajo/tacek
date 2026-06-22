@@ -32,6 +32,7 @@ export interface Event {
   presentMemberIds: string[];
   selfPaidMemberIds?: string[]; // IDs členů co platili si sami (bez dýška)
   presetItems?: EventItem[]; // produkty z účtenky (varianta A)
+  voucherAmount?: number; // výše voucheru snižující částku každého člena rovnoměrně
   status: 'open' | 'closed';
 }
 
@@ -52,6 +53,7 @@ export interface MemberBalance {
   consumptionTotal: number;
   tipShare: number;
   entryFeeTotal: number;
+  voucherDiscount: number; // sleva z voucheru
   totalOwed: number;
   hasPaid: boolean;
   isPayer: boolean;
@@ -78,5 +80,6 @@ export interface EventDraft {
   selfPaidMemberIds: string[];
   hasReceipt: boolean;
   presetItems: EventItem[];
+  voucherAmount: string;
   savedAt: Date;
 }

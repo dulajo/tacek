@@ -9,8 +9,10 @@ interface PayerSectionProps {
   onPayerChange: (payerId: string) => void;
   totalAmount: string;
   tip: string;
+  voucherAmount: string;
   onTotalAmountChange: (value: string) => void;
   onTipChange: (value: string) => void;
+  onVoucherAmountChange: (value: string) => void;
 }
 
 export function PayerSection({
@@ -20,8 +22,10 @@ export function PayerSection({
   onPayerChange,
   totalAmount,
   tip,
+  voucherAmount,
   onTotalAmountChange,
   onTipChange,
+  onVoucherAmountChange,
 }: PayerSectionProps) {
   const payer = payerId ? members.find(m => m.id === payerId) : null;
   const hasPaymentInfo = payer ? (payer.revolutUsername || payer.bankAccount) : false;
@@ -99,6 +103,24 @@ export function PayerSection({
             placeholder="např. 200"
           />
         </div>
+      </div>
+
+      <div className="mb-4">
+        <label className="label">Voucher (Kč)</label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={voucherAmount}
+          onChange={(e) => onVoucherAmountChange(e.target.value)}
+          className="input"
+          placeholder="např. 500"
+        />
+        {voucherAmount && parseFloat(voucherAmount) > 0 && selectedMemberIds.length > 0 && (
+          <p className="text-sm text-green-700 mt-1">
+            Každý člen zaplatí o {(parseFloat(voucherAmount) / selectedMemberIds.length).toFixed(2)} Kč méně
+          </p>
+        )}
       </div>
     </div>
   );

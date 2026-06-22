@@ -92,6 +92,7 @@ export function calculateMemberBalance(
       consumptionTotal: 0,
       tipShare: 0,
       entryFeeTotal: 0,
+      voucherDiscount: 0,
       totalOwed: 0,
       hasPaid: true, // Self-paid members are automatically "paid"
       isPayer: false,
@@ -119,9 +120,15 @@ export function calculateMemberBalance(
   const selfPaidCount = event.selfPaidMemberIds?.length || 0;
   const tipPayingMemberCount = event.presentMemberIds.length - selfPaidCount;
   const tipShare = calculateTipPerMember(event.tip, tipPayingMemberCount);
-  
-  // Celková dlužná částka (konzumace + sdílené + startovné + dýško)
-  const totalOwed = consumptionTotal + sharedTotal + entryFeeTotal + tipShare;
+
+  // Sleva z voucheru rozdělená rovnoměrně mezi všechny přítomné členy
+  const voucherDiscount = event.voucherAmount && event.presentMemberIds.length > 0
+    ? Math.round((event.voucherAmount / event.presentMemberIds.length) * 100) / 100
+    : 0;
+
+  // Celková dlužná částka (konzumace + sdílené + startovné + dýško - voucher)
+  const rawOwed = consumptionTotal + sharedTotal + entryFeeTotal + tipShare;
+  const totalOwed = Math.max(0, rawOwed - voucherDiscount);
 
   return {
     memberId,
@@ -129,6 +136,7 @@ export function calculateMemberBalance(
     consumptionTotal: consumptionTotal + sharedTotal,
     tipShare,
     entryFeeTotal,
+    voucherDiscount,
     totalOwed: isPayer ? 0 : totalOwed, // Platič má dluh 0
     hasPaid: consumption.hasPaid,
     isPayer,
